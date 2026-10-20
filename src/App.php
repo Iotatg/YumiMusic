@@ -1895,20 +1895,21 @@ final class App
         if ($thumb !== '' && $this->db->thumbnailsDisabled($chatId) === false) {
             try {
                 [$plain, $entities] = MsgEntities::parse($caption);
+                $rid = random_int(1, PHP_INT_MAX);
                 $req = (new TlNode('messages.sendMedia'))
                     ->put('peer', $this->botPeers->inputPeer($chatId))
                     ->put('media', (new TlNode('inputMediaPhotoExternal'))
                         ->put('flags', 0)
                         ->put('url', $thumb))
                     ->put('message', $plain)
-                    ->put('random_id', random_int(1, PHP_INT_MAX));
+                    ->put('random_id', $rid);
                 if ($entities !== []) {
                     $req->put('entities', $entities);
                 }
                 $req->put('reply_markup', $this->playMarkup($r));
                 $res = $this->bot->invoke($req, 30);
                 $this->botPeers->learnFrom($res);
-                return $this->updatesMsgId($res);
+                return $this->updatesMsgId($res, $chatId, $rid);
             } catch (Throwable $e) {
                 echo "[yumi] photo card failed: " . $e->getMessage() . " — text fallback\n";
             }
@@ -2292,26 +2293,65 @@ final class App
     // ── telegram sends ───────────────────────────────────────────────────────
 
     /** Extract the real message id from a messages.* send response (Updates node). */
-    private function updatesMsgId(TlNode $res): int
+    /**
+     * Extract the id of the message we just created.
+     *
+     * Telegram may batch unrelated updates into the same `updates` container
+     * (a join-request in another group, for instance), so a blind "first id
+     * wins" scan can return a foreign message id and every later edit fails.
+     * Match on the destination peer, then on our own random_id.
+     */
+    private function updatesMsgId(TlNode $res, int $chatId = 0, int $rid = 0): int
     {
+        $fallbackMsg = 0;
+        $fallbackRid = 0;
         foreach ($res->list('updates') as $u) {
             if (!$u instanceof TlNode) {
                 continue;
             }
             if (in_array($u->name, ['message', 'messageEmpty', 'messageService'], true)) {
-                return (int) $u->l('id');
+                $id = (int) $u->l('id');
+                if ($this->peerMatches($u->node('peer_id'), $chatId)) {
+                    return $id;
+                }
+                $fallbackMsg = $fallbackMsg ?: $id;
+                continue;
             }
             if ($u->name === 'updateNewMessage' || $u->name === 'updateNewChannelMessage') {
                 $m = $u->node('message');
                 if ($m !== null) {
-                    return (int) $m->l('id');
+                    $id = (int) $m->l('id');
+                    if ($chatId === 0 || $this->peerMatches($m->node('peer_id'), $chatId)) {
+                        return $id;
+                    }
+                    $fallbackMsg = $fallbackMsg ?: $id;
                 }
+                continue;
             }
             if ($u->name === 'updateMessageID') {
-                return (int) $u->l('id');
+                $id = (int) $u->l('id');
+                if ($rid !== 0 && $u->has('random_id') && $u->l('random_id') === $rid) {
+                    return $id;
+                }
+                $fallbackRid = $fallbackRid ?: $id;
             }
         }
-        return 0;
+        return $fallbackMsg ?: $fallbackRid;
+    }
+
+    private function peerMatches(?TlNode $peer, int $chatId): bool
+    {
+        if ($peer === null || $chatId === 0) {
+            return false;
+        }
+        if ($chatId <= -1000000000000) {
+            return $peer->name === 'peerChannel'
+                && (int) $peer->l('channel_id') === (int) substr((string) $chatId, 4);
+        }
+        if ($chatId < 0) {
+            return $peer->name === 'peerChat' && (int) $peer->l('chat_id') === -$chatId;
+        }
+        return $peer->name === 'peerUser' && (int) $peer->l('user_id') === $chatId;
     }
 
     public function send(int $chatId, string $text, int $replyTo = 0, ?TlNode $markup = null): int
@@ -2321,10 +2361,11 @@ final class App
         }
         try {
             [$plain, $entities] = MsgEntities::parse($text);
+            $rid = (int) (microtime(true) * 1e6) ^ random_int(0, PHP_INT_MAX);
             $req = (new TlNode('messages.sendMessage'))
                 ->put('peer', $this->botPeers->inputPeer($chatId))
                 ->put('message', $plain)
-                ->put('random_id', (int) (microtime(true) * 1e6) ^ random_int(0, PHP_INT_MAX));
+                ->put('random_id', $rid);
             if ($replyTo > 0) {
                 $req->put('reply_to_msg_id', $replyTo);
             }
@@ -2336,7 +2377,7 @@ final class App
             }
             $res = $this->bot->invoke($req, 30);
             $this->botPeers->learnFrom($res);
-            return $this->updatesMsgId($res) ?: ($res->l('id') ?? 0);
+            return $this->updatesMsgId($res, $chatId, $rid) ?: ($res->l('id') ?? 0);
         } catch (Throwable $e) {
             echo "[yumi] send failed ($chatId): " . $e->getMessage() . "\n";
             return 0;
