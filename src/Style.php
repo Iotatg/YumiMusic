@@ -116,6 +116,13 @@ final class Util
         return self::escapeHtml($s);
     }
 
+    /** Random colored square for buttons (Nandani-parity colored accents). */
+    public static function randColor(): string
+    {
+        $c = ["\u{1F7E5}", "\u{1F7E6}", "\u{1F7E7}", "\u{1F7E8}", "\u{1F7E9}", "\u{1F7EA}", "\u{1F7EB}"];
+        return $c[array_rand($c)];
+    }
+
     public static function htmlMention(string $name, int $id): string
     {
         $n = trim($name);

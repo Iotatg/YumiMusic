@@ -36,7 +36,10 @@ final class MsgEntities
                             if ($stack[$k][0] === $name) {
                                 [$t, $start] = $stack[$k];
                                 $len = $u16len - $start;
-                                $entities[] = self::entity($name, $start, $len);
+                                // Telegram rejects zero-length entities (ENTITY_BOUNDS_INVALID)
+                                if ($len > 0) {
+                                    $entities[] = self::entity($name, $start, $len);
+                                }
                                 array_splice($stack, $k, 1);
                                 break;
                             }
@@ -71,7 +74,10 @@ final class MsgEntities
         }
         // unclosed tags: close at end
         foreach ($stack as [$t, $start]) {
-            $entities[] = self::entity($t, $start, $u16len - $start);
+            $len = $u16len - $start;
+            if ($len > 0) {
+                $entities[] = self::entity($t, $start, $len);
+            }
         }
         return [$out, $entities];
     }

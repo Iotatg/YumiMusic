@@ -57,23 +57,23 @@ final class Buttons
 
         $all = [];
         if (!$queued) {
-            $all[] = [self::cb($progress, $prefix . 'progress')];
+            $all[] = [self::cb(Util::randColor() . ' ' . $progress, $prefix . 'progress')];
         }
         $all[] = [
-            self::cb("\u{25B7}", $prefix . 'resume'),
-            self::cb('II', $prefix . 'pause'),
-            self::cb("\u{27F3}", $prefix . 'replay'),
-            self::cb("\u{2023}\u{2023}I", $prefix . 'skip'),
-            self::cb("\u{25A2}", $prefix . 'stop'),
+            self::cb(Util::randColor() . "\u{25B7}", $prefix . 'resume'),
+            self::cb(Util::randColor() . 'II', $prefix . 'pause'),
+            self::cb(Util::randColor() . "\u{27F3}", $prefix . 'replay'),
+            self::cb(Util::randColor() . "\u{2023}\u{2023}I", $prefix . 'skip'),
+            self::cb(Util::randColor() . "\u{25A2}", $prefix . 'stop'),
         ];
         $all[] = [
-            self::cb("-\u{1D7D8}\u{1D7D7}\u{02E2}", $prefix . 'seekback_15'),
-            self::cb("\u{1D7D8}\u{1D7D7}\u{02E2}+", $prefix . 'seek_15'),
+            self::cb(Util::randColor() . "-\u{1D7D8}\u{1D7D7}\u{02E2}", $prefix . 'seekback_15'),
+            self::cb("\u{1D7D8}\u{1D7D7}\u{02E2}+" . Util::randColor(), $prefix . 'seek_15'),
         ];
         $state = $r->autoplay ? 'enabled' : 'disabled';
         $apText = $loc->f($lang, 'autoplay_btn', 'state', $loc->get($lang, $state));
-        $all[] = [self::cb($apText, $prefix . 'autoplay_toggle')];
-        $all[] = [self::cb($loc->get($lang, 'CLOSE_BTN'), $prefix . 'close')];
+        $all[] = [self::cb(Util::randColor() . ' ' . $apText, $prefix . 'autoplay_toggle')];
+        $all[] = [self::cb(Util::randColor() . ' ' . $loc->get($lang, 'CLOSE_BTN'), $prefix . 'close')];
         return self::rows($all);
     }
 

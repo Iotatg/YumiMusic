@@ -77,6 +77,9 @@ final class Locales
                 if (self::$currentCommand !== null) {
                     $text = str_replace('{cmd}', self::$currentCommand, $text);
                 }
+                // Optional template lines ({speed_line} etc.) that no caller fills
+                // must not leak as literal placeholders — drop those lines.
+                $text = preg_replace('/^[ \t]*\{[a-z0-9_]+\}[ \t]*\R?/mi', '', $text) ?? $text;
                 return $text;
             }
         }

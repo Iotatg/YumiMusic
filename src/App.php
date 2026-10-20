@@ -306,9 +306,9 @@ final class App
             $this->dispatch($chatId, $sender, $cmd, $arg, $msg);
         } catch (Throwable $e) {
             echo "[yumi] cmd $cmd failed: " . $e->getMessage() . "\n";
-            $this->send($chatId, Util::stylish(
-                "{emoji:❌} <b>єꝛꝛσꝛ:</b> " . Util::escapeHtml($e->getMessage())
-            ), $msg->i('id'));
+            $this->send($chatId, $this->t($chatId, 'generic_error', [
+                'error' => Util::escapeHtml($e->getMessage()),
+            ]), $msg->i('id'));
         }
         Locales::setCurrentCommand(null);
     }
@@ -388,10 +388,10 @@ final class App
                 return;
             case '/play':
             case '/song':
-                $this->cmdPlay($chatId, $sender, $arg, false, $msg->i('id'));
+                $this->cmdPlay($chatId, $sender, $arg, false, $msg->i('id'), $msg->node('reply_to')?->l('reply_to_msg_id') ?? 0);
                 return;
             case '/vplay':
-                $this->cmdPlay($chatId, $sender, $arg, true, $msg->i('id'));
+                $this->cmdPlay($chatId, $sender, $arg, true, $msg->i('id'), $msg->node('reply_to')?->l('reply_to_msg_id') ?? 0);
                 return;
             case '/video':
                 $this->cmdVideoFile($chatId, $sender, $arg);
@@ -499,25 +499,34 @@ final class App
                     $this->send($chatId, $this->t($chatId, 'seek_no_active'));
                     return;
                 }
-                if ($arg === '') {
-                    $this->send($chatId, $this->t($chatId, 'loop_usage', ['count_line' => '']));
+                $q = strtolower(trim($arg));
+                if ($q === 'enable' || $q === 'on') {
+                    $r->loop = true;
+                    $r->loopLeft = 1;
+                    $this->send($chatId, $this->t($chatId, 'loop_enabled'));
                     return;
                 }
-                if (!ctype_digit($arg) || (int) $arg > 10) {
-                    $this->send($chatId, $this->t($chatId, 'loop_invalid'));
-                    return;
-                }
-                $n = (int) $arg;
-                if ($n === 0) {
+                if ($q === 'disable' || $q === 'off') {
                     $r->loop = false;
                     $r->loopLeft = 0;
                     $this->send($chatId, $this->t($chatId, 'loop_disabled', ['user' => $this->mention($sender)]));
-                } else {
+                    return;
+                }
+                $n = ctype_digit($q) ? (int) $q : 0;
+                if ($n > 10) {
+                    $this->send($chatId, $this->t($chatId, 'loop_invalid'));
+                    return;
+                }
+                if ($n > 0) {
                     $r->loop = true;
                     $r->loopLeft = $n;
                     $this->send($chatId, $this->t($chatId, 'loop_set', [
-                        'count' => $n, 'user' => $this->mention($sender),
+                        'count' => (string) $n, 'user' => $this->mention($sender),
                     ]));
+                } else {
+                    $r->loop = false;
+                    $r->loopLeft = 0;
+                    $this->send($chatId, $this->t($chatId, 'loop_disabled', ['user' => $this->mention($sender)]));
                 }
                 return;
             case '/shuffle':
@@ -596,11 +605,17 @@ final class App
 
     // ── play pipeline ────────────────────────────────────────────────────────
 
-    private function cmdPlay(int $chatId, int $sender, string $arg, bool $vcVideo, int $replyTo = 0): void
+    private function cmdPlay(int $chatId, int $sender, string $arg, bool $vcVideo, int $replyTo = 0, int $replied = 0): void
     {
         if ($arg === '') {
-            Locales::setCurrentCommand($vcVideo ? '/vplay' : '/play');
-            $this->send($chatId, $this->t($chatId, 'cplay_usage'), $replyTo);
+            // Nandani parity: no arg + no reply → usage template; empty query
+            // with reply → searching then no_song_found (resolveQuery("") = []).
+            if ($replied === 0) {
+                $this->send($chatId, $this->t($chatId, $vcVideo ? 'vplay_usage' : 'no_song_query'), $replyTo);
+                return;
+            }
+            $this->send($chatId, $this->t($chatId, 'searching'));
+            $this->send($chatId, $this->t($chatId, 'no_song_found'));
             return;
         }
         $this->send($chatId, $this->t($chatId, 'searching_query', ['query' => Util::escapeHtml($arg)]));
@@ -622,6 +637,7 @@ final class App
             if ($vcVideo) {
                 $t['video'] = true;
             }
+            $t['req'] = $sender;
             $r->queue[] = $t;
             $this->send($chatId, $this->t($chatId, 'play_added_to_queue_single', [
                 'index' => (string) count($r->queue),
@@ -717,8 +733,9 @@ final class App
         }
         $secs = (int) $arg;
         $dur = (int) ($r->track['duration'] ?? 0);
-        $target = $back ? max(0, $r->position - $secs) : min($dur, $r->position + $secs);
-        if (!$back && $dur > 0 && $r->position + $secs > $dur - 5) {
+        // Nandani semantics: /seek N jumps to absolute second N; /seekback N rewinds N.
+        $target = $back ? max(0, $r->position - $secs) : min($dur > 0 ? $dur : $secs, $secs);
+        if (!$back && $dur > 0 && $secs > $dur - 5) {
             $this->send($chatId, $this->t($chatId, 'seek_too_close_end', ['seconds' => (string) $secs]));
             return;
         }
@@ -788,25 +805,50 @@ final class App
         }
         $lang = $this->lang($chatId);
         $count = count($r->queue) + ($r->track !== null ? 1 : 0);
-        $body = $this->loc->f($lang, 'queue_header', 'count', (string) $count) . "\n\n";
+        $body = $this->loc->f($lang, 'queue_header', 'count', (string) $count) . "\n";
         if ($r->track !== null) {
-            $body .= $this->loc->get($lang, 'queue_now_playing') . "\n";
-            $body .= '▪ ' . $this->trackLine($r->track, $r->position) . "\n";
+            $body .= $this->loc->f($lang, 'queue_now_playing_item',
+                'url', $this->trackUrl($r->track),
+                'title', Util::escapeHtml(Util::shortTitle((string) $r->track['title'], 30)),
+                'duration', Util::formatTime((int) ($r->track['duration'] ?? 0)),
+                'by', $this->requesterMention($r->track),
+            ) . "\n";
         }
-        if ($r->queue !== []) {
-            if ($r->track !== null) {
-                $body .= "\n" . $this->loc->get($lang, 'queue_up_next') . "\n";
+        $i = 1;
+        foreach ($r->queue as $t) {
+            if ($i > 30) {
+                $body .= $this->loc->f($lang, 'queue_more', 'remaining', (string) (count($r->queue) - 30));
+                break;
             }
-            foreach (array_slice($r->queue, 0, 10) as $i => $t) {
-                $body .= '➻ <b>' . ($i + 1) . '.</b> ' . $this->trackLine($t, 0) . "\n";
-            }
-            if (count($r->queue) > 10) {
-                $body .= $this->loc->f($lang, 'queue_more_line', 'remaining', (string) (count($r->queue) - 10));
-            }
-        } else {
+            $body .= $this->loc->f($lang, 'queue_item',
+                'index', (string) $i++,
+                'url', $this->trackUrl($t),
+                'title', Util::escapeHtml(Util::shortTitle((string) $t['title'], 30)),
+                'duration', Util::formatTime((int) ($t['duration'] ?? 0)),
+                'by', $this->requesterMention($t),
+            ) . "\n";
+        }
+        if ($r->queue === []) {
             $body .= "\n" . $this->loc->get($lang, 'queue_empty_tail');
         }
-        $this->send($chatId, $body);
+        $this->send($chatId, $body, 0, $this->playMarkup($r, true));
+    }
+
+    /** Requester mention of a track (falls back to the bot). */
+    private function requesterMention(array $t): string
+    {
+        $req = (int) ($t['req'] ?? 0);
+        return $req > 0 ? $this->mention($req) : $this->botName();
+    }
+
+    private function botName(): string
+    {
+        try {
+            $n = $this->botPeers->userName(8713141466);
+            return $n !== '' ? Util::escapeHtml($n) : '𝐘‌υϻɪ 𝘅 ϻ‌υsɪᴄ';
+        } catch (Throwable) {
+            return '𝐘‌υϻɪ 𝘅 ϻ‌υsɪᴄ';
+        }
     }
 
     private function trackLine(array $t, int $position): string
@@ -850,6 +892,7 @@ final class App
 
     private function startTrack(int $chatId, Room $r, array $t, int $sender, bool $vcVideo = false): void
     {
+        $t['req'] = $t['req'] ?? $sender;
         $r->track = $t;
         $r->position = 0;
         $r->endStreak = 0;
@@ -1038,9 +1081,9 @@ final class App
 
     // ── buttons ──────────────────────────────────────────────────────────────
 
-    private function playMarkup(Room $r): TlNode
+    private function playMarkup(Room $r, bool $queued = false): TlNode
     {
-        return Buttons::playMarkup($this->loc, $this->lang($r->chatId), $r, false);
+        return Buttons::playMarkup($this->loc, $this->lang($r->chatId), $r, $queued);
     }
 
     private function onCallback(TlNode $q): void
@@ -1363,11 +1406,11 @@ final class App
                 ->put('mime_type', $video ? 'video/mp4' : 'audio/mpeg')
                 ->put('attributes', $attrs)
                 ->put('force_file', false);
-            $caption = Util::stylish(
+            $caption = Util::stylish(Locales::expandEmojis(
                 "{emoji:🎵} <b>ʏσυꝛ sσɴɢ ғꝛσᴍ {bot}!</b>\n\n<blockquote>❖ "
                 . Util::escapeHtml((string) ($track['title'] ?? ''))
                 . "\n➥ <i>ᴘʟᴧʏɪηɢ ɪη ᴠᴄ ᴧηᴅ sєηᴛ ʜєꝛє ♬</i></blockquote>"
-            );
+            ));
             $caption = str_replace('{bot}', $this->botName, $caption);
             $req = (new TlNode('messages.sendMedia'))
                 ->put('peer', $this->botPeers->inputPeer($chatId))

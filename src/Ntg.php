@@ -147,7 +147,7 @@ final class Ntg
 
     private static function boolOut(int $rc, FFI $ffi, FFI\CData $out): bool
     {
-        return $rc === 0 && !FFI::isNull($out) && $out->cdata;
+        return $rc === 0 && (bool) $out->cdata;
     }
 
     public function pause(int $chatId): bool
