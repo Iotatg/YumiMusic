@@ -276,6 +276,27 @@ final class MtProto
         if (!$this->connected()) {
             throw new RuntimeException($this->tag . ': not connected');
         }
+        $floodTries = 0;
+        while (true) {
+            try {
+                return $this->invokeOnce($query, $timeoutSeconds);
+            } catch (RuntimeException $e) {
+                // Transparent FLOOD_WAIT handling — the server tells us exactly
+                // how long to wait; retrying is always correct for idempotent RPCs.
+                if ($floodTries < 2 && preg_match('/FLOOD_WAIT_(\d+)/', $e->getMessage(), $m)) {
+                    $wait = min((int) $m[1] + 1, 300);
+                    echo "[{$this->tag}] flood wait {$wait}s ({$query->name})\n";
+                    sleep($wait);
+                    $floodTries++;
+                    continue;
+                }
+                throw $e;
+            }
+        }
+    }
+
+    private function invokeOnce(TlNode $query, int $timeoutSeconds): TlNode
+    {
         $body = TlCodec::write($query);
         $bare = in_array($query->name, ['ping', 'pong', 'ping_delay_disconnect', 'getFutureSalts'], true);
         if (!$this->inited && !$bare) {

@@ -192,6 +192,7 @@ final class App
                 ['pause', 'ᴘᴧᴜsє ᴘʟᴧʏʙᴧᴄᴋ'], ['resume', 'ʀєsᴜᴍє ᴘʟᴧʏʙᴧᴄᴋ'],
                 ['skip', 'sᴋɪᴘ ᴄυꝛꝛєηᴛ ᴛꝛᴧᴄᴋ'], ['stop', 'sᴛσᴘ ᴧηᴅ ᴄʟєᴧꝛ'],
                 ['end', 'sᴛσᴘ ᴧηᴅ ᴄʟєᴧꝛ'], ['queue', 'sʜσᴡ ǫᴜєᴜє'],
+                ['replay', 'ʀєsᴛᴧʀᴛ ᴄυꝛꝛєηᴛ ᴛʀᴧᴄᴋ'],
                 ['loop', 'ʟσσᴘ ᴄυꝛꝛєηᴛ [1-10]'], ['shuffle', 'sʜᴜғғʟє ǫᴜєᴜє'],
                 ['autoplay', 'ᴧᴜᴛσᴘʟᴧʏ ᴘᴧηєʟ'], ['seek', 'sєєᴋ sєᴄσηᴅs'],
                 ['position', 'ᴄυꝛꝛєηᴛ ᴛɪᴍєsᴛᴧᴍᴘ'], ['leave', 'ʟєᴧᴠє ᴠσɪᴄє ᴄʜᴧᴛ'],
@@ -565,6 +566,25 @@ final class App
                     return;
                 }
                 $this->cmdJump($chatId, $sender, $arg);
+                return;
+            case '/replay':
+                if (!$this->guardVc($chatId)) {
+                    return;
+                }
+                $r = $this->rooms[$chatId] ?? null;
+                if ($r === null || $r->track === null || $r->path === '') {
+                    $this->send($chatId, $this->t($chatId, 'seek_no_active'));
+                    return;
+                }
+                $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
+                if ($err !== '') {
+                    $this->send($chatId, $this->t($chatId, 'play_failed', ['error' => Util::escapeHtml($err)]));
+                    return;
+                }
+                $r->position = 0;
+                $r->endStreak = 0;
+                $r->paused = false;
+                $this->send($chatId, $this->t($chatId, 'cb_replaying'), 0, $this->playMarkup($r));
                 return;
             case '/position':
                 $r = $this->rooms[$chatId] ?? null;
