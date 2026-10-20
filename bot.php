@@ -59,6 +59,7 @@ require __DIR__ . '/src/RsaKey.php';
 require __DIR__ . '/src/MtProto.php';
 require __DIR__ . '/src/Ntg.php';
 require __DIR__ . '/src/Iota.php';
+require __DIR__ . '/src/UrlResolver.php';
 require __DIR__ . '/src/Peers.php';
 require __DIR__ . '/src/Voice.php';
 require __DIR__ . '/src/Style.php';

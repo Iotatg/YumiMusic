@@ -21,12 +21,16 @@ final class App
     private Db $db;
     private string $botName;
     private string $ntgVer = '3.0.4';
+    private string $assistantUser = '';
+    private bool $maint = false;
 
     /** @var array<int, Room> */
     public array $rooms = [];
 
     /** @var array<int, array<int, array>> chatId → last search results */
     private array $searchCache = [];
+    /** @var array<string, bool> chatId:userId → admin flag (cleared by /reload) */
+    private array $adminCache = [];
     private int $lastPing = 0;
     private int $lastTick = 0;
     private int $lastCardEdit = 0;
@@ -175,6 +179,9 @@ final class App
             foreach ($me->list('users') as $u) {
                 if ($u instanceof TlNode && $u->name === 'user') {
                     echo "[yumi-assistant] resumed as {$u->str('first_name')} @{$u->str('username')} ({$u->l('id')})\n";
+                    if ($u->str('username') !== '') {
+                        $this->assistantUser = $u->str('username');
+                    }
                 }
             }
             $this->voice->peers()->refresh();
@@ -197,6 +204,16 @@ final class App
                 ['autoplay', 'ᴧᴜᴛσᴘʟᴧʏ ᴘᴧηєʟ'], ['seek', 'sєєᴋ sєᴄσηᴅs'],
                 ['position', 'ᴄυꝛꝛєηᴛ ᴛɪᴍєsᴛᴧᴍᴘ'], ['leave', 'ʟєᴧᴠє ᴠσɪᴄє ᴄʜᴧᴛ'],
                 ['lang', 'sєʟєᴄᴛ ʟᴧηɢᴜᴧɢє'], ['ping', 'ʟᴧᴛєηᴄʏ ᴧηᴅ sʏsᴛєᴍ'],
+                ['ac', 'ᴧᴄᴛɪᴠє ᴠσɪᴄє ᴄʜᴧᴛs'], ['vcstatus', 'ᴠσɪᴄє єηɢɪηє sᴛᴧᴛυs'],
+                ['settings', 'ᴄʜᴧᴛ sєᴛᴛɪηɢs'], ['id', 'ᴄʜᴧᴛ / υsєʀ ɪᴅs'],
+                ['alive', 'ʙσᴛ υᴘᴛɪᴍє ᴧηᴅ ʀᴧᴍ'], ['speed', 'ᴘʟᴧʏʙᴧᴄᴋ sᴘєєᴅ 0.5–4'],
+                ['move', 'ᴍσᴠє ǫᴜєᴜє ɪᴛєᴍ'], ['remove', 'ʀєᴍσᴠє ǫᴜєᴜє ɪᴛєᴍ'],
+                ['auth', 'ᴧυᴛʜσʀɪᴢє ᴧ υsєʀ'], ['unauth', 'ʀєᴠσᴋє ᴧυᴛʜσʀɪᴢᴧᴛɪση'],
+                ['authlist', 'ʟɪsᴛ ᴧυᴛʜσʀɪᴢєᴅ υsєʀs'], ['warn', 'ωᴧʀη ᴧ υsєʀ'],
+                ['warnings', 'sʜσᴡ ωᴧʀηɪηɢs'], ['ban', 'ʙᴧη ᴧ υsєʀ'],
+                ['unban', 'υηʙᴧη ᴧ υsєʀ'], ['kick', 'ᴋɪᴄᴋ ᴧ υsєʀ'],
+                ['purge', 'ᴅєʟєᴛє ᴍєssᴧɢєs'], ['pin', 'ᴘɪη ᴧ ᴍєssᴧɢє'],
+                ['privacy', 'ᴘʀɪᴠᴧᴄʏ ɪηғσ'], ['repo', 'sσυʀᴄє ᴄσᴅє'],
             ];
             $vectors = [];
             foreach ($names as [$cmd, $desc]) {
@@ -303,6 +320,12 @@ final class App
         $arg = trim(preg_replace('/^\/[a-z0-9_]+(@\w+)?\s*/i', '', $text));
         Locales::setCurrentCommand($cmd);
         echo "[yumi] chat=$chatId user=$sender cmd=$cmd\n";
+        if ($this->maint && $sender !== $this->ownerId && !in_array($cmd, ['/start', '/help', '/ping', '/alive'], true)) {
+            $this->send($chatId, "🛠️ <b>𝐁‌σᴛ 𝐈‌s υηᴅєʀ 𝐌‌ᴧɪηᴛєηᴧηᴄє</b>\n\n"
+                . '<blockquote>ᴘʟєᴧsє ᴛʀʏ ᴧɢᴧɪη ɪη ᴧ ғєᴡ ᴍɪηυᴛєs.</blockquote>');
+            Locales::setCurrentCommand(null);
+            return;
+        }
         try {
             $this->dispatch($chatId, $sender, $cmd, $arg, $msg);
         } catch (Throwable $e) {
@@ -351,8 +374,38 @@ final class App
 
     // ── commands ─────────────────────────────────────────────────────────────
 
+    /**
+     * Nandani ships the same handler under several names — channel-scoped
+     * (`cplay`, `cskip`), force (`playforce`), video (`vplay`, `vcplay`) and
+     * legacy spellings. Normalising here keeps one implementation per action
+     * instead of a switch arm for every synonym.
+     */
+    private const ALIASES = [
+        '/song' => '/play', '/cplay' => '/play', '/fplay' => '/play',
+        '/fcplay' => '/play', '/cforceplay' => '/play', '/cfplay' => '/play',
+        '/cplayforce' => '/play', '/playforce' => '/play', '/channelplay' => '/play',
+        '/cvplay' => '/vplay', '/vcplay' => '/vplay', '/fvplay' => '/vplay',
+        '/fvcplay' => '/vplay', '/vplayforce' => '/vplay', '/vcplayforce' => '/vplay',
+        '/cskip' => '/skip', '/caskip' => '/skip', '/askip' => '/skip',
+        '/cpause' => '/pause', '/cresume' => '/resume', '/cstop' => '/stop',
+        '/cend' => '/stop', '/cseek' => '/seek', '/cseekback' => '/seekback',
+        '/cloop' => '/loop', '/cshuffle' => '/shuffle', '/cspeed' => '/speed',
+        '/csetspeed' => '/setspeed', '/cspeedup' => '/speedup', '/cjump' => '/jump',
+        '/cmove' => '/move', '/cremove' => '/remove', '/cclear' => '/clear',
+        '/cqueue' => '/queue', '/cpos' => '/position', '/cposition' => '/position',
+        '/creplay' => '/replay', '/cmute' => '/mute', '/cunmute' => '/unmute',
+        '/creload' => '/reload', '/activevoice' => '/ac', '/activevc' => '/ac',
+        '/active' => '/ac', '/vcstats' => '/vcstatus', '/nothumbs' => '/nothumb',
+        '/language' => '/lang', '/source' => '/repo', '/sudoadd' => '/addsudo',
+        '/sudodel' => '/rmsudo', '/sudolist' => '/sudo', '/sudorem' => '/rmsudo',
+        '/dropsudo' => '/rmsudo', '/gcast' => '/bcast', '/bcast' => '/broadcast',
+        '/maintenance' => '/maint', '/clearstickers' => '/clear',
+        '/clearnote' => '/clear', '/clearfilters' => '/clear',
+    ];
+
     private function dispatch(int $chatId, int $sender, string $cmd, string $arg, TlNode $msg): void
     {
+        $cmd = self::ALIASES[$cmd] ?? $cmd;
         switch ($cmd) {
             case '/start':
                 if ($chatId > 0) {
@@ -577,7 +630,7 @@ final class App
                     return;
                 }
                 $this->voice?->ntg->stop($chatId);
-                $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
+                $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false), 0, $r->speed);
                 if ($err !== '') {
                     $this->send($chatId, $this->t($chatId, 'play_failed', ['error' => Util::escapeHtml($err)]));
                     return;
@@ -612,7 +665,875 @@ final class App
                 $this->send($chatId, $this->statsText($chatId), 0,
                     Buttons::repoMarkup($this->loc, $this->lang($chatId), $this->ownerId));
                 return;
+
+            // ── system / info ────────────────────────────────────────────────
+            case '/ac':
+            case '/active':
+            case '/activevc':
+            case '/activevoice':
+                $this->cmdActiveVc($chatId, $sender);
+                return;
+            case '/vcstatus':
+            case '/vcstats':
+                $this->cmdVcStatus($chatId);
+                return;
+            case '/id':
+                $this->cmdId($chatId, $sender, $msg);
+                return;
+            case '/alive':
+                $this->cmdAlive($chatId);
+                return;
+            case '/repo':
+            case '/source':
+                $this->send($chatId, $this->t($chatId, 'repo_text'),
+                    0, Buttons::repoMarkup($this->loc, $this->lang($chatId), $this->ownerId));
+                return;
+            case '/privacy':
+                $this->send($chatId, "<b>🔒 𝐏‌ʀɪᴠᴧᴄʏ</b>\n\n<blockquote>"
+                    . '𝐘‌υϻɪ 𝘅 ϻ‌υsɪᴄ sᴛσʀєs ᴄʜᴧᴛ sєᴛᴛɪηɢs, ᴘʟᴧʏʟɪsᴛs, ωᴧʀηɪηɢs ᴧηᴅ ησᴛєs ɪη '
+                    . 'ᴀ sᴍᴧʟʟ ʟσᴄᴧʟ ᴅᴧᴛᴧʙᴧsє. 𝐍‌σ ᴍєssᴧɢє ᴄσηᴛєηᴛ ɪs ᴘєʀsɪsᴛєᴅ. '
+                    . 'sᴛʀєᴧᴍs ᴧʀє ʀєsσʟᴠєᴅ ση ᴅєᴍᴧηᴅ ᴧηᴅ ᴄᴧᴄʜєᴅ ᴛєᴍᴘσʀᴧʀɪʟʏ ғσʀ ᴘʟᴧʏʙᴧᴄᴋ.'
+                    . '</blockquote>');
+                return;
+            case '/settings':
+                $this->cmdSettings($chatId);
+                return;
+            case '/speed':
+            case '/setspeed':
+            case '/cspeed':
+            case '/csetspeed':
+            case '/speedup':
+            case '/cspeedup':
+                $this->cmdSpeed($chatId, $sender, $arg);
+                return;
+            case '/move':
+            case '/cmove':
+                $this->cmdMove($chatId, $arg);
+                return;
+            case '/remove':
+            case '/cremove':
+                $this->cmdRemove($chatId, $arg);
+                return;
+
+            // ── authorization ────────────────────────────────────────────────
+            case '/auth':
+            case '/addauth':
+            case '/authorize':
+            case '/addsudo':
+            case '/addsudoer':
+            case '/sudo':
+            case '/sudoers':
+            case '/sudolist':
+            case '/listsudo':
+                if (in_array($cmd, ['/sudo', '/sudoers', '/sudolist', '/listsudo'], true)) {
+                    $this->send($chatId, '<b>🛡️ 𝐒‌υᴅσ 𝐔‌sєʀs</b>'
+                        . "\n\n<blockquote>❖ σᴡηєʀ: " . $this->mention($this->ownerId)
+                        . "\n➥ ʀєsᴛ ɪs ᴍᴧηᴧɢєᴅ ʙʏ ᴛʜє ʙσᴛ σᴡηєʀ ᴘᴧηєʟ.</blockquote>");
+                    return;
+                }
+                $this->cmdAuth($chatId, $sender, $arg, $msg, true);
+                return;
+            case '/unauth':
+            case '/delauth':
+            case '/delauthuser':
+            case '/delsudo':
+            case '/delsudoer':
+            case '/rmsudo':
+            case '/remsudo':
+            case '/sudodel':
+            case '/sudorem':
+                $this->cmdAuth($chatId, $sender, $arg, $msg, false);
+                return;
+            case '/authlist':
+            case '/authusers':
+                $this->cmdAuthList($chatId);
+                return;
+
+            // ── moderation ───────────────────────────────────────────────────
+            case '/ban':
+            case '/blockuser':
+            case '/blacklistuser':
+            case '/bluser':
+            case '/blackuser':
+                $this->cmdBan($chatId, $sender, $arg, $msg, 'ban');
+                return;
+            case '/unban':
+            case '/unblockuser':
+            case '/unblacklistuser':
+            case '/unbluser':
+                $this->cmdBan($chatId, $sender, $arg, $msg, 'unban');
+                return;
+            case '/kick':
+                $this->cmdBan($chatId, $sender, $arg, $msg, 'kick');
+                return;
+            case '/purge':
+                $this->cmdPurge($chatId, $sender, $msg);
+                return;
+            case '/pin':
+                $this->cmdPin($chatId, $sender, $msg, false);
+                return;
+            case '/unpin':
+                $this->cmdPin($chatId, $sender, $msg, true);
+                return;
+            case '/warn':
+                $this->cmdWarn($chatId, $sender, $arg, $msg);
+                return;
+            case '/warnings':
+            case '/warns':
+                $this->cmdWarnings($chatId, $sender, $arg, $msg);
+                return;
+            case '/resetwarns':
+            case '/clearwarn':
+            case '/unwarn':
+                $this->cmdResetWarns($chatId, $sender, $arg, $msg);
+                return;
+            case '/setwarnlimit':
+            case '/warnlimit':
+                $this->cmdSetWarnLimit($chatId, $sender, $arg);
+                return;
+            case '/setwarnmode':
+                $this->cmdSetWarnMode($chatId, $sender, $arg);
+                return;
+
+            // ── chat settings (Nandani AdminModule) ──────────────────────────
+            case '/playmode':
+                $this->cmdPlayMode($chatId, $sender, $arg);
+                return;
+            case '/adminmode':
+                $this->cmdAdminMode($chatId, $sender, $arg);
+                return;
+            case '/nothumb':
+                $this->cmdNoThumb($chatId, $sender);
+                return;
+            case '/autoleave':
+                $this->cmdAutoLeave($chatId, $sender, $arg);
+                return;
+            case '/setcplay':
+                $this->cmdSetCPlay($chatId, $sender, $arg);
+                return;
+            case '/reload':
+                $this->cmdReload($chatId, $sender);
+                return;
+            case '/save':
+                $this->db->save();
+                $this->send($chatId, '💾 <b>𝐒‌єᴛᴛɪηɢs 𝐒‌ᴧᴠєᴅ</b>');
+                return;
+            case '/bug':
+                $this->cmdBug($chatId, $sender, $arg);
+                return;
+            case '/unpinall':
+                $this->cmdUnpinAll($chatId, $sender);
+                return;
+
+            // ── owner tools ──────────────────────────────────────────────────
+            case '/broadcast':
+            case '/bcast':
+            case '/gcast':
+                $this->cmdBroadcast($chatId, $sender, $arg);
+                return;
+            case '/maint':
+            case '/maintenance':
+                if ($sender !== $this->ownerId) {
+                    $this->send($chatId, $this->t($chatId, 'only_admin'));
+                    return;
+                }
+                $this->maint = !$this->maint;
+                $this->send($chatId, $this->maint
+                    ? '🛠️ <b>𝐌‌ᴧɪηᴛєηᴧηᴄє 𝐌‌σᴅє 𝐎‌η</b>'
+                    : '✅ <b>𝐌‌ᴧɪηᴛєηᴧηᴄє 𝐌‌σᴅє 𝐎‌ғғ</b>');
+                return;
+            case '/restart':
+                if ($sender !== $this->ownerId) {
+                    $this->send($chatId, $this->t($chatId, 'only_admin'));
+                    return;
+                }
+                $this->send($chatId, '♻️ <b>𝐑‌єsᴛᴧʀᴛɪηɢ...</b>');
+                sleep(1);
+                exit(0);
         }
+    }
+
+    // ── system / info commands ───────────────────────────────────────────────
+
+    private function cmdActiveVc(int $chatId, int $sender): void
+    {
+        if ($chatId > 0 && $sender !== $this->ownerId) {
+            $this->send($chatId, $this->t($chatId, 'groups_only'));
+            return;
+        }
+        if ($this->rooms === []) {
+            $this->send($chatId, $this->t($chatId, 'no_active_vc'));
+            return;
+        }
+        $out = '<b>🎤 𝐀‌ᴄᴛɪᴠє 𝐕‌σɪᴄє 𝐂‌ʜᴧᴛs — ' . count($this->rooms) . '</b>';
+        foreach ($this->rooms as $cid => $r) {
+            $title = $r->track === null ? '—' : (string) ($r->track['title'] ?? '—');
+            $out .= "\n\n<blockquote>❖ <b>𝐂‌ʜᴧᴛ:</b> <code>" . $cid . "</code>\n"
+                . '➥ <b>𝐍‌σᴡ 𝐏‌ʟᴧʏɪηɢ:</b> ' . Util::escapeHtml(Util::shortTitle($title, 30)) . "\n"
+                . '➥ <b>𝐐‌υєυє:</b> ' . count($r->queue) . ' 𝐓‌ꝛᴧᴄᴋs ♬</blockquote>';
+        }
+        $this->send($chatId, $out);
+    }
+
+    private function cmdVcStatus(int $chatId): void
+    {
+        $ready = isset($this->voice) && $this->voice->mt->connected();
+        $out = "<b>⚙️ 𝐕‌σɪᴄє 𝐄‌ηɢɪηє 𝐒‌ᴛᴧᴛυs</b>\n\n<blockquote>"
+            . '❖ <b>𝐀‌ssɪsᴛᴧηᴛs:</b> <code>' . (isset($this->voice) ? 1 : 0) . "</code>\n"
+            . '❖ <b>𝐀‌ᴄᴛɪᴠє 𝐑‌σσᴍs:</b> <code>' . count($this->rooms) . "</code>\n"
+            . '➥ #1 ' . ($this->assistantUser !== '' ? '@' . $this->assistantUser : 'ᴀssɪsᴛᴧηᴛ')
+            . ' — ' . ($ready ? '✅ ʀєᴧᴅʏ' : '⚠️ σғғʟɪηє') . "\n"
+            . '❖ <b>ηᴛɢᴄᴧʟʟs:</b> <code>' . $this->ntgVer . "</code>\n"
+            . '❖ <b>υᴘᴛɪᴍє:</b> <code>' . Util::formatUptime(time() - $this->started) . '</code>'
+            . '</blockquote>';
+        $this->send($chatId, $out);
+    }
+
+    private function cmdId(int $chatId, int $sender, TlNode $msg): void
+    {
+        $out = '<b>𝐂‌ʜᴧᴛ:</b> <code>' . $chatId . "</code>\n"
+            . '<b>𝐔‌sєꝛ:</b> <code>' . $sender . "</code>\n"
+            . '<b>𝐌‌єssᴧɢє:</b> <code>' . $msg->i('id') . '</code>';
+        $this->send($chatId, $out);
+    }
+
+    private function cmdAlive(int $chatId): void
+    {
+        $out = "<b>💚 𝐘‌υϻɪ 𝘅 ϻ‌υsɪᴄ ɪs ᴧʟɪᴠє</b>\n\n<blockquote>"
+            . '❖ <b>υᴘᴛɪᴍє:</b> <code>' . Util::formatUptime(time() - $this->started) . "</code>\n"
+            . '❖ <b>𝐑‌ᴧᴍ:</b> <code>' . Util::ramInfo() . "</code>\n"
+            . '❖ <b>𝐂‌ᴘυ:</b> <code>' . Util::cpuInfo() . "</code>\n"
+            . '❖ <b>𝐀‌ᴄᴛɪᴠє 𝐑‌σσᴍs:</b> <code>' . count($this->rooms) . '</code>'
+            . '</blockquote>';
+        $this->send($chatId, $out);
+    }
+
+    private function cmdSettings(int $chatId): void
+    {
+        $lang = $this->lang($chatId);
+        $this->send($chatId, $this->t($chatId, 'settings_main', [
+            'title' => Util::escapeHtml($chatId > 0 ? 'ᴘʀɪᴠᴧᴛє ᴄʜᴧᴛ' : (string) $chatId),
+            'id' => (string) $chatId,
+        ]), 0, Buttons::settingsKeyboard($this->loc, $lang, $this->db, $chatId));
+    }
+
+    // ── chat settings (AdminModule parity) ───────────────────────────────────
+
+    private function canManageSettings(int $chatId, int $sender): bool
+    {
+        if ($chatId > 0) {
+            return true;
+        }
+        return $this->isAdmin($chatId, $sender) || $this->db->isAuth($chatId, $sender);
+    }
+
+    private function cmdPlayMode(int $chatId, int $sender, string $arg): void
+    {
+        if (!$this->canManageSettings($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $arg = strtolower(trim($arg));
+        if ($arg === '') {
+            $admins = $this->db->playMode($chatId) === 'admin';
+            $this->send($chatId, $this->loc->f($this->lang($chatId), 'playmode_help', 'status',
+                $this->loc->f($this->lang($chatId), $admins ? 'playmode_status_admins' : 'playmode_status_everyone')));
+            return;
+        }
+        $admins = in_array($arg, ['admin', 'admins', 'on', 'enable', 'enabled'], true);
+        $this->db->setPlayMode($chatId, $admins ? 'admin' : 'everyone');
+        $this->send($chatId, $this->loc->f($this->lang($chatId),
+            $admins ? 'playmode_success_admins' : 'playmode_success_everyone'));
+    }
+
+    private function cmdAdminMode(int $chatId, int $sender, string $arg): void
+    {
+        if (!$this->canManageSettings($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $arg = strtolower(trim($arg));
+        $on = in_array($arg, ['admin', 'admins', 'on', 'enable', 'enabled'], true);
+        if ($arg === '') {
+            $on = !$this->db->adminMode($chatId);
+        }
+        $this->db->setAdminMode($chatId, $on);
+        $this->send($chatId, $this->loc->f($this->lang($chatId), 'adminmode_updated', 'status',
+            $this->loc->f($this->lang($chatId), $on ? 'adminmode_status_admin' : 'adminmode_status_everyone')));
+    }
+
+    private function cmdNoThumb(int $chatId, int $sender): void
+    {
+        if (!$this->canManageSettings($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $cur = $this->db->thumbnailsDisabled($chatId);
+        $this->db->setThumbnailsDisabled($chatId, !$cur);
+        $this->send($chatId, $this->loc->f($this->lang($chatId), 'nothumb_updated', 'action',
+            $this->loc->f($this->lang($chatId), !$cur ? 'disabled' : 'enabled')));
+    }
+
+    private function cmdAutoLeave(int $chatId, int $sender, string $arg): void
+    {
+        if ($sender !== $this->ownerId) {
+            $this->send($chatId, $this->t($chatId, 'only_sudo'));
+            return;
+        }
+        $arg = strtolower(trim($arg));
+        if ($arg !== '') {
+            $this->db->setAutoLeave($chatId, in_array($arg, ['on', 'enable', 'enabled', 'yes'], true));
+        }
+        $this->send($chatId, $this->loc->f($this->lang($chatId), 'autoleave_status', 'status',
+            $this->db->autoLeave($chatId) ? 'on' : 'off'));
+    }
+
+    private function cmdSetCPlay(int $chatId, int $sender, string $arg): void
+    {
+        if ($sender !== $this->ownerId) {
+            $this->send($chatId, $this->t($chatId, 'cplay_owner_required'));
+            return;
+        }
+        $lang = $this->lang($chatId);
+        $arg = trim($arg);
+        if ($arg === '') {
+            $linked = $this->db->linkedChannel($chatId);
+            $this->send($chatId, $linked === 0
+                ? $this->loc->get($lang, 'cplay_id_not_set')
+                : $this->loc->f($lang, 'cplay_enabled', 'chat', (string) $linked));
+            return;
+        }
+        if (in_array(strtolower($arg), ['off', 'disable', 'none', '0'], true)) {
+            $this->db->setLinkedChannel($chatId, 0);
+            $this->send($chatId, $this->loc->get($lang, 'cplay_disabled'));
+            return;
+        }
+        $id = ltrim($arg, '-');
+        if (!ctype_digit($id)) {
+            $this->send($chatId, $this->loc->get($lang, 'cplay_invalid_target'));
+            return;
+        }
+        $this->db->setLinkedChannel($chatId, (int) $arg);
+        $this->send($chatId, $this->loc->f($lang, 'cplay_enabled', 'chat', (string) (int) $arg));
+    }
+
+    private function cmdReload(int $chatId, int $sender): void
+    {
+        if (!$this->canManageSettings($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        // Drop cached peer/admin lookups so the next command re-reads them.
+        $this->adminCache = [];
+        $this->send($chatId, '🔄 <b>𝐀‌ᴅᴍɪη 𝐂‌ᴧᴄʜє 𝐑‌єʟσᴧᴅєᴅ</b>');
+    }
+
+    private function cmdBug(int $chatId, int $sender, string $arg): void
+    {
+        $arg = trim($arg);
+        if ($arg === '') {
+            $this->send($chatId, '🐞 <b>𝐁‌υɢ 𝐑‌єᴘσʀᴛ</b>'
+                . "\n\n<blockquote>➥ υsє: <code>/bug &lt;ʏσυʀ ʀєᴘσʀᴛ&gt;</code></blockquote>");
+            return;
+        }
+        $this->send($this->ownerId, '🐞 <b>𝐍‌єω 𝐁‌υɢ 𝐑‌єᴘσʀᴛ</b>'
+            . "\n\n<blockquote>❖ <b>𝐅‌ʀσᴍ:</b> " . $this->mention($sender)
+            . "\n❖ <b>𝐂‌ʜᴧᴛ:</b> <code>" . $chatId . "</code>"
+            . "\n➥ <b>𝐑‌єᴘσʀᴛ:</b> " . Util::escapeHtml($arg) . '</blockquote>');
+        $this->send($chatId, '✅ <b>𝐑‌єᴘσʀᴛ 𝐒‌єηᴛ</b>'
+            . "\n\n<blockquote>➥ ᴛʜᴧηᴋs! ᴛʜє σᴡηєʀ ωɪʟʟ ʀєᴠɪєω ɪᴛ.</blockquote>");
+    }
+
+    private function cmdUnpinAll(int $chatId, int $sender): void
+    {
+        if ($chatId > 0) {
+            $this->send($chatId, $this->t($chatId, 'groups_only'));
+            return;
+        }
+        if (!$this->isAdmin($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        try {
+            $this->bot->invoke((new TlNode('messages.unpinAllMessages'))
+                ->put('peer', $this->botPeers->inputPeer($chatId)), 20);
+            $this->send($chatId, '📌 <b>𝐀‌ʟʟ 𝐏‌ɪηs 𝐑‌єᴍσᴠєᴅ</b>');
+        } catch (Throwable $e) {
+            $this->send($chatId, $this->t($chatId, 'generic_error', ['error' => Util::escapeHtml($e->getMessage())]));
+        }
+    }
+
+    private function cmdSpeed(int $chatId, int $sender, string $arg): void
+    {
+        $r = $this->rooms[$chatId] ?? null;
+        if ($arg === '') {
+            $cur = $r !== null ? $r->speed : $this->db->speed($chatId);
+            $this->send($chatId, $this->t($chatId, 'speed_current', ['speed' => number_format($cur, 2)]));
+            return;
+        }
+        if (!is_numeric($arg) || (float) $arg < 0.5 || (float) $arg > 4.0) {
+            Locales::setCurrentCommand('/speed');
+            $this->send($chatId, $this->t($chatId, 'speed_invalid'));
+            return;
+        }
+        $sp = round((float) $arg, 2);
+        $this->db->setSpeed($chatId, $sp);
+        if ($r === null || $r->track === null || $r->path === '') {
+            $this->send($chatId, $this->t($chatId, 'speed_set', ['speed' => number_format($sp, 2)]));
+            return;
+        }
+        $r->speed = $sp;
+        $err = $this->seekTo($chatId, $r, $r->position);
+        if ($err !== '') {
+            $this->send($chatId, $this->t($chatId, 'play_failed', ['error' => Util::escapeHtml($err)]));
+            return;
+        }
+        $this->send($chatId, $this->t($chatId, 'speed_set', ['speed' => number_format($sp, 2)]), 0, $this->playMarkup($r));
+    }
+
+    private function cmdMove(int $chatId, string $arg): void
+    {
+        $r = $this->rooms[$chatId] ?? null;
+        if ($r === null || $r->queue === []) {
+            $this->send($chatId, $this->t($chatId, 'queue_empty'));
+            return;
+        }
+        if (!preg_match('~^(\d+)\s+(\d+)$~', $arg, $m)) {
+            Locales::setCurrentCommand('/move');
+            $this->send($chatId, $this->t($chatId, 'move_usage'));
+            return;
+        }
+        $from = (int) $m[1] - 1;
+        $to = (int) $m[2] - 1;
+        $n = count($r->queue);
+        if ($from < 0 || $from >= $n || $to < 0 || $to >= $n) {
+            $this->send($chatId, $this->t($chatId, 'move_invalid', ['count' => (string) $n]));
+            return;
+        }
+        $item = $r->queue[$from];
+        array_splice($r->queue, $from, 1);
+        array_splice($r->queue, $to, 0, [$item]);
+        $this->send($chatId, $this->t($chatId, 'move_success', [
+            'title' => Util::escapeHtml(Util::shortTitle((string) ($item['title'] ?? '-'), 30)),
+            'from' => (string) ($from + 1), 'to' => (string) ($to + 1),
+        ]), 0, $this->playMarkup($r, true));
+    }
+
+    private function cmdRemove(int $chatId, string $arg): void
+    {
+        $r = $this->rooms[$chatId] ?? null;
+        if ($r === null || $r->queue === []) {
+            $this->send($chatId, $this->t($chatId, 'queue_empty'));
+            return;
+        }
+        if (!ctype_digit($arg)) {
+            Locales::setCurrentCommand('/remove');
+            $this->send($chatId, $this->t($chatId, 'remove_usage'));
+            return;
+        }
+        $i = (int) $arg - 1;
+        if (!isset($r->queue[$i])) {
+            $this->send($chatId, $this->t($chatId, 'remove_invalid', ['count' => (string) count($r->queue)]));
+            return;
+        }
+        $item = $r->queue[$i];
+        array_splice($r->queue, $i, 1);
+        $this->send($chatId, $this->t($chatId, 'remove_success', [
+            'title' => Util::escapeHtml(Util::shortTitle((string) ($item['title'] ?? '-'), 30)),
+        ]), 0, $this->playMarkup($r, true));
+    }
+
+    // ── authorization ────────────────────────────────────────────────────────
+
+    /** Resolve a target user from reply, numeric id or @username. */
+    private function targetUser(TlNode $msg, string $arg): int
+    {
+        $arg = trim($arg);
+        if ($arg !== '') {
+            $arg = preg_replace('~^@~', '', $arg) ?? $arg;
+            if (ctype_digit($arg)) {
+                return (int) $arg;
+            }
+            try {
+                $res = $this->bot->invoke((new TlNode('contacts.resolveUsername'))
+                    ->put('username', $arg), 20);
+                $this->botPeers->learnFrom($res);
+                foreach ($res->list('users') as $u) {
+                    if ($u instanceof TlNode) {
+                        return (int) $u->l('id');
+                    }
+                }
+            } catch (Throwable $e) {
+                echo "[yumi] resolve @$arg failed: " . $e->getMessage() . "\n";
+            }
+            return 0;
+        }
+        $rid = $msg->node('reply_to')?->l('reply_to_msg_id') ?? 0;
+        if ($rid === 0) {
+            return 0;
+        }
+        try {
+            $res = $this->bot->invoke((new TlNode('messages.getMessages'))
+                ->put('id', [(new TlNode('inputMessageReplyTo'))->put('id', $rid)]), 20);
+            $this->botPeers->learnFrom($res);
+            foreach ($res->list('messages') as $m) {
+                if (!$m instanceof TlNode) {
+                    continue;
+                }
+                $from = $m->node('from_id');
+                if ($from !== null && $from->name === 'peerUser') {
+                    return (int) $from->l('user_id');
+                }
+            }
+        } catch (Throwable $e) {
+            echo "[yumi] reply target failed: " . $e->getMessage() . "\n";
+        }
+        return 0;
+    }
+
+    private function cmdAuth(int $chatId, int $sender, string $arg, TlNode $msg, bool $add): void
+    {
+        if (!$this->isAdmin($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin_or_auth'));
+            return;
+        }
+        $uid = $this->targetUser($msg, $arg);
+        if ($uid === 0) {
+            $this->send($chatId, $this->t($chatId, 'auth_no_user'));
+            return;
+        }
+        if ($add) {
+            if ($uid === $sender || $uid === $this->ownerId) {
+                $this->send($chatId, $this->t($chatId, 'cannot_authorize_user'));
+                return;
+            }
+            if (!$this->db->addAuth($chatId, $uid)) {
+                $this->send($chatId, $this->t($chatId, 'already_authed'));
+                return;
+            }
+            $this->send($chatId, $this->t($chatId, 'addauth_success_with_count', [
+                'user' => $this->mention($uid),
+                'count' => (string) count($this->db->authUsers($chatId)),
+                'limit' => '∞',
+            ]));
+            return;
+        }
+        if (!$this->db->delAuth($chatId, $uid)) {
+            $this->send($chatId, $this->t($chatId, 'del_auth_not_authorized'));
+            return;
+        }
+        $this->send($chatId, $this->t($chatId, 'del_auth_success', ['user' => $this->mention($uid)]));
+    }
+
+    private function cmdAuthList(int $chatId): void
+    {
+        $users = $this->db->authUsers($chatId);
+        if ($users === []) {
+            $this->send($chatId, $this->t($chatId, 'authlist_empty'));
+            return;
+        }
+        $out = $this->t($chatId, 'authlist_header');
+        $i = 1;
+        foreach ($users as $u) {
+            $out .= "\n" . $this->t($chatId, 'authlist_user_entry', [
+                'index' => (string) $i++,
+                'user' => $this->mention($u),
+                'user_id' => (string) $u,
+            ]);
+        }
+        $out .= "\n" . $this->t($chatId, 'authlist_total', ['count' => (string) count($users)]);
+        $this->send($chatId, $out);
+    }
+
+    // ── moderation ───────────────────────────────────────────────────────────
+
+    private function canManage(int $chatId, int $sender): bool
+    {
+        return $chatId < 0 && $this->isAdmin($chatId, $sender);
+    }
+
+    private function cmdBan(int $chatId, int $sender, string $arg, TlNode $msg, string $mode): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $uid = $this->targetUser($msg, $arg);
+        if ($uid === 0) {
+            $this->send($chatId, $this->t($chatId, 'user_extract_fail', ['error' => 'ησ ᴛᴧʀɢєᴛ']));
+            return;
+        }
+        try {
+            $peer = $this->botPeers->inputPeer($chatId);
+            $user = $this->botPeers->inputPeer($uid);
+            if ($peer->name === 'inputPeerChannel') {
+                $rights = (new TlNode('chatBannedRights'))
+                    ->put('until_date', 0)
+                    ->put('view_messages', true)
+                    ->put('send_messages', true)
+                    ->put('send_media', true)
+                    ->put('send_stickers', true)
+                    ->put('send_gifs', true)
+                    ->put('send_games', true)
+                    ->put('send_inline', true)
+                    ->put('embed_links', true);
+                if ($mode === 'unban') {
+                    $rights = (new TlNode('chatBannedRights'))->put('until_date', 0);
+                }
+                $this->bot->invoke((new TlNode('channels.editBanned'))
+                    ->put('channel', $peer)
+                    ->put('participant', $user)
+                    ->put('banned_rights', $rights), 20);
+            } else {
+                $gid = -$chatId;
+                $this->bot->invoke((new TlNode('messages.deleteChatUser'))
+                    ->put('chat_id', $gid)
+                    ->put('user_id', (new TlNode('inputUser'))
+                        ->put('user_id', $uid)
+                        ->put('access_hash', $user->l('access_hash')))
+                    ->put('revoke_history', true), 20);
+            }
+        } catch (Throwable $e) {
+            $this->send($chatId, $this->t($chatId, 'generic_error', ['error' => Util::escapeHtml($e->getMessage())]));
+            return;
+        }
+        if ($mode === 'kick') {
+            try {
+                if ($peer->name === 'inputPeerChannel') {
+                    $this->bot->invoke((new TlNode('channels.editBanned'))
+                        ->put('channel', $peer)
+                        ->put('participant', $user)
+                        ->put('banned_rights', (new TlNode('chatBannedRights'))->put('until_date', 0)), 20);
+                }
+            } catch (Throwable $ignored) {
+            }
+            $this->send($chatId, $this->t($chatId, 'kick_success', ['user' => $this->mention($uid)]));
+            return;
+        }
+        $key = $mode === 'unban' ? 'unban_success' : 'ban_success';
+        $this->send($chatId, $this->t($chatId, $key, ['user' => $this->mention($uid)]));
+    }
+
+    private function cmdPurge(int $chatId, int $sender, TlNode $msg): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $rid = $msg->node('reply_to')?->l('reply_to_msg_id') ?? 0;
+        if ($rid === 0) {
+            $this->send($chatId, $this->t($chatId, 'purge_usage'));
+            return;
+        }
+        $cur = $msg->i('id');
+        $ids = [];
+        for ($i = $rid; $i <= $cur && count($ids) < 100; $i++) {
+            $ids[] = $i;
+        }
+        try {
+            $this->bot->invoke((new TlNode('messages.deleteMessages'))
+                ->put('id', $ids)
+                ->put('revoke', true), 25);
+        } catch (Throwable $e) {
+            $this->send($chatId, $this->t($chatId, 'generic_error', ['error' => Util::escapeHtml($e->getMessage())]));
+            return;
+        }
+        $this->send($chatId, $this->t($chatId, 'purge_success', ['count' => (string) count($ids)]));
+    }
+
+    private function cmdPin(int $chatId, int $sender, TlNode $msg, bool $unpin): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $rid = $msg->node('reply_to')?->l('reply_to_msg_id') ?? 0;
+        if ($rid === 0) {
+            $this->send($chatId, $this->t($chatId, 'pin_usage'));
+            return;
+        }
+        try {
+            $this->bot->invoke((new TlNode('messages.updatePinnedMessage'))
+                ->put('peer', $this->botPeers->inputPeer($chatId))
+                ->put('id', $rid)
+                ->put('unpin', $unpin), 20);
+        } catch (Throwable $e) {
+            $this->send($chatId, $this->t($chatId, 'generic_error', ['error' => Util::escapeHtml($e->getMessage())]));
+            return;
+        }
+        $this->send($chatId, $this->t($chatId, $unpin ? 'unpin_success' : 'pin_success'));
+    }
+
+    // ── warnings ─────────────────────────────────────────────────────────────
+
+    private function cmdWarn(int $chatId, int $sender, string $arg, TlNode $msg): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $uid = $this->targetUser($msg, '');
+        if ($uid === 0) {
+            $this->send($chatId, $this->t($chatId, 'auth_no_user'));
+            return;
+        }
+        if ($uid === $sender || $uid === $this->ownerId) {
+            $this->send($chatId, $this->t($chatId, 'cannot_authorize_user'));
+            return;
+        }
+        $count = $this->db->addWarn($chatId, $uid, $arg);
+        $limit = $this->db->warnLimit($chatId);
+        $this->send($chatId, $this->t($chatId, 'warn_success', [
+            'user' => $this->mention($uid),
+            'count' => (string) $count,
+            'limit' => (string) $limit,
+        ]));
+        if ($count >= $limit) {
+            $mode = $this->db->warnMode($chatId);
+            $this->db->resetWarns($chatId, $uid);
+            $this->applyWarnAction($chatId, $uid, $mode);
+            $this->send($chatId, $this->t($chatId, 'warn_limit_action', [
+                'user' => $this->mention($uid),
+                'mode' => strtoupper($mode),
+            ]));
+        }
+    }
+
+    private function applyWarnAction(int $chatId, int $uid, string $mode): void
+    {
+        if ($mode === 'mute') {
+            $mode = 'ban';
+        }
+        try {
+            $peer = $this->botPeers->inputPeer($chatId);
+            $user = $this->botPeers->inputPeer($uid);
+            if ($peer->name === 'inputPeerChannel') {
+                $rights = $mode === 'kick'
+                    ? (new TlNode('chatBannedRights'))->put('until_date', 0)
+                    : (new TlNode('chatBannedRights'))
+                        ->put('until_date', 0)
+                        ->put('view_messages', true)
+                        ->put('send_messages', true)
+                        ->put('send_media', true)
+                        ->put('send_stickers', true)
+                        ->put('send_gifs', true)
+                        ->put('send_games', true)
+                        ->put('send_inline', true)
+                        ->put('embed_links', true);
+                $this->bot->invoke((new TlNode('channels.editBanned'))
+                    ->put('channel', $peer)
+                    ->put('participant', $user)
+                    ->put('banned_rights', $rights), 20);
+                if ($mode === 'kick') {
+                    $this->bot->invoke((new TlNode('channels.editBanned'))
+                        ->put('channel', $peer)
+                        ->put('participant', $user)
+                        ->put('banned_rights', (new TlNode('chatBannedRights'))->put('until_date', 0)), 20);
+                }
+            }
+        } catch (Throwable $e) {
+            echo "[yumi] warn action failed: " . $e->getMessage() . "\n";
+        }
+    }
+
+    private function cmdWarnings(int $chatId, int $sender, string $arg, TlNode $msg): void
+    {
+        $uid = $this->targetUser($msg, $arg);
+        if ($uid === 0) {
+            $uid = $sender;
+        }
+        $w = $this->db->warns($chatId, $uid);
+        if ($w['count'] === 0) {
+            $this->send($chatId, $this->t($chatId, 'warnings_empty'));
+            return;
+        }
+        $this->send($chatId, $this->t($chatId, 'warnings_header', [
+            'user' => $this->mention($uid),
+            'count' => (string) $w['count'],
+            'limit' => (string) $this->db->warnLimit($chatId),
+        ]));
+    }
+
+    private function cmdResetWarns(int $chatId, int $sender, string $arg, TlNode $msg): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $uid = $this->targetUser($msg, $arg);
+        if ($uid === 0) {
+            $this->send($chatId, $this->t($chatId, 'auth_no_user'));
+            return;
+        }
+        $n = $this->db->resetWarns($chatId, $uid);
+        $this->send($chatId, $this->t($chatId, 'warns_reset', ['count' => (string) $n]));
+    }
+
+    private function cmdSetWarnLimit(int $chatId, int $sender, string $arg): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $n = (int) $arg;
+        if ($n < 2 || $n > 20) {
+            Locales::setCurrentCommand('/setwarnlimit');
+            $this->send($chatId, $this->t($chatId, 'warn_limit_usage'));
+            return;
+        }
+        $this->db->setWarnLimit($chatId, $n);
+        $this->send($chatId, $this->t($chatId, 'warn_limit_set', ['limit' => (string) $n]));
+    }
+
+    private function cmdSetWarnMode(int $chatId, int $sender, string $arg): void
+    {
+        if (!$this->canManage($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $m = strtolower(trim($arg));
+        if (!in_array($m, ['ban', 'kick', 'mute'], true)) {
+            Locales::setCurrentCommand('/setwarnmode');
+            $this->send($chatId, $this->t($chatId, 'warn_mode_usage'));
+            return;
+        }
+        $this->db->setWarnMode($chatId, $m);
+        $this->send($chatId, $this->t($chatId, 'warn_mode_set', ['mode' => strtoupper($m)]));
+    }
+
+    // ── broadcast (owner) ────────────────────────────────────────────────────
+
+    private function cmdBroadcast(int $chatId, int $sender, string $arg): void
+    {
+        if ($sender !== $this->ownerId) {
+            $this->send($chatId, $this->t($chatId, 'sudo_owner_only'));
+            return;
+        }
+        if (trim($arg) === '') {
+            $this->send($chatId, $this->t($chatId, 'broadcast_no_content'));
+            return;
+        }
+        $targets = $this->db->chatIds();
+        $this->send($chatId, $this->t($chatId, 'broadcast_initializing'));
+        $ok = 0;
+        $fail = 0;
+        foreach ($targets as $target) {
+            if ($target === $chatId) {
+                continue;
+            }
+            try {
+                $this->bot->invoke((new TlNode('messages.sendMessage'))
+                    ->put('peer', $this->botPeers->inputPeer($target))
+                    ->put('message', $arg)
+                    ->put('random_id', random_int(1, PHP_INT_MAX)), 20);
+                $ok++;
+            } catch (Throwable $e) {
+                $fail++;
+            }
+            usleep(120000);
+        }
+        $this->send($chatId, '<b>📡 𝐁‌ꝛσᴧᴅᴄᴧsᴛ 𝐃‌σηє</b>'
+            . "\n\n<blockquote>✅ sєηᴛ: <code>$ok</code>\n❌ ғᴧɪʟєᴅ: <code>$fail</code></blockquote>");
     }
 
     private function guardVc(int $chatId): bool
@@ -640,9 +1561,20 @@ final class App
             return;
         }
         $this->send($chatId, $this->t($chatId, 'searching_query', ['query' => Util::escapeHtml($arg)]));
-        $results = $this->iota->search($arg, 5);
+        if ($chatId < 0 && $this->db->playMode($chatId) === 'admin' && !$this->isAdmin($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'playmode_restricted'));
+            return;
+        }
+        // Pasted links (Spotify / Apple Music / Deezer / YouTube / direct file)
+        // must be resolved to a real track first — iota would treat the URL
+        // itself as a text query and return nothing.
+        if (UrlResolver::isUrl($arg)) {
+            $results = UrlResolver::resolve($arg, $this->iota);
+        } else {
+            $results = $this->iota->search($arg, 5);
+        }
         if ($results === []) {
-            $this->send($chatId, $this->t($chatId, 'play_download_failed'));
+            $this->send($chatId, $this->t($chatId, 'no_song_found'));
             return;
         }
         if (!isset($this->rooms[$chatId])) {
@@ -672,9 +1604,18 @@ final class App
 
     private function trackUrl(array $t): string
     {
-        $id = $t['media_id'] ?? '';
+        $id = (string) ($t['media_id'] ?? '');
+        if (str_starts_with($id, 'url:')) {
+            return substr($id, 4);
+        }
         if (preg_match('#^yt:(.+)$#', $id, $mm)) {
             return 'https://youtu.be/' . $mm[1];
+        }
+        if (preg_match('#^am:(\d+)$#', $id, $mm)) {
+            return 'https://music.apple.com/song/' . $mm[1];
+        }
+        if (preg_match('#^dz:(\d+)$#', $id, $mm)) {
+            return 'https://www.deezer.com/track/' . $mm[1];
         }
         return 'https://youtube.com';
     }
@@ -809,7 +1750,7 @@ final class App
     private function seekTo(int $chatId, Room $r, int $target): string
     {
         $this->voice?->ntg->stop($chatId);
-        $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false), $target);
+        $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false), $target, $r->speed);
         if ($err === '') {
             $r->position = $target;
             $r->endStreak = 0;
@@ -926,7 +1867,8 @@ final class App
             return;
         }
         $r->path = $path;
-        $err = $this->voice?->playFile($chatId, $path, $vcVideo);
+        $r->speed = $this->db->speed($chatId);
+        $err = $this->voice?->playFile($chatId, $path, $vcVideo, 0, $r->speed);
         if ($err !== '') {
             $r->track = null;
             echo "[yumi] playFile failed: $err\n";
@@ -976,7 +1918,12 @@ final class App
 
     private function resolveTrack(array $t, bool $video): ?string
     {
-        $id = str_replace(':', '_', (string) $t['media_id']);
+        $mediaId = (string) ($t['media_id'] ?? '');
+        // Direct media link: ntgcalls' ffmpeg source streams http(s) URLs as-is.
+        if (str_starts_with($mediaId, 'url:')) {
+            return substr($mediaId, 4);
+        }
+        $id = str_replace(':', '_', $mediaId);
         $dest = $this->downloads . '/' . $id . ($video ? '.mp4' : '.audio');
         if (is_file($dest) && filesize($dest) > 1024) {
             return $dest;
@@ -1004,7 +1951,7 @@ final class App
         }
         if ($r->loop && $r->path !== '') {
             $this->voice?->ntg->stop($chatId);
-            $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
+            $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false), 0, $r->speed);
             if ($err === '') {
                 $r->position = 0;
                 $r->endStreak = 0;
@@ -1123,6 +2070,36 @@ final class App
                 $this->onRoomCallback($q, $chatId, $action, $parts[3] ?? '', $sender, $lang);
                 return;
             }
+            // Prefix routing must use ifs — `case str_starts_with(...)` in a
+            // switch compares loosely and would swallow every later branch.
+            if (str_starts_with($data, 'help:')) {
+                $section = substr($data, 5);
+                $this->editOrSend($q, $this->loc->get($lang, 'help_' . $section),
+                    Buttons::backKeyboard($this->loc, $lang));
+                $this->answerQuery($queryId, '', false);
+                return;
+            }
+            if (str_starts_with($data, 'set:')) {
+                $this->onSettingCallback($q, substr($data, 4), $sender, $queryId, $lang);
+                return;
+            }
+            if ($data === 'lang:menu') {
+                $this->editOrSend($q, $this->loc->get($lang, 'lang_select'), Buttons::langKeyboard($this->loc, $lang));
+                $this->answerQuery($queryId, '', false);
+                return;
+            }
+            if (str_starts_with($data, 'lang:')) {
+                $code = substr($data, 5);
+                if (!in_array($code, $this->loc->available(), true)) {
+                    $this->answerQuery($queryId, $this->loc->get($lang, 'lang_fail'), true);
+                    return;
+                }
+                $this->db->setLang($sender, $code);
+                $this->answerQuery($queryId, $this->loc->f($code, 'lang_success', 'lang_name',
+                    $this->loc->get($code, 'name')), false);
+                $this->editOrSend($q, $this->loc->get($code, 'lang_select'), Buttons::langKeyboard($this->loc, $code));
+                return;
+            }
             switch ($data) {
                 case 'start':
                     $this->editOrSend($q, $this->loc->f($lang, 'start_private', 'user', $this->mention($sender)),
@@ -1135,18 +2112,13 @@ final class App
                         Buttons::helpKeyboard($this->loc, $lang));
                     $this->answerQuery($queryId, '', false);
                     return;
-                case str_starts_with($data, 'help:'):
-                    $section = substr($data, 5);
-                    $key = 'help_' . $section;
-                    $this->editOrSend($q, $this->loc->get($lang, $key), Buttons::backKeyboard($this->loc, $lang));
+                case 'close':
+                    try {
+                        $this->bot->invoke((new TlNode('messages.deleteMessages'))
+                            ->put('id', [$q->i('msg_id')]), 15);
+                    } catch (Throwable $ignored) {
+                    }
                     $this->answerQuery($queryId, '', false);
-                    return;
-                case str_starts_with($data, 'lang:'):
-                    $code = substr($data, 5);
-                    $this->db->setLang($sender, $code);
-                    $this->answerQuery($queryId, $this->loc->f($code, 'lang_success', 'lang_name',
-                        $this->loc->get($code, 'name')), false);
-                    $this->editOrSend($q, $this->loc->get($code, 'lang_select'), Buttons::langKeyboard($this->loc, $code));
                     return;
                 case 'cancel':
                     $this->answerQuery($queryId, $this->loc->get($lang, 'no_download_to_cancel'), false);
@@ -1155,6 +2127,52 @@ final class App
         } catch (Throwable $e) {
             echo "[yumi] callback failed: " . $e->getMessage() . "\n";
             $this->answerQuery($queryId, $this->loc->get($lang, 'invalid_request'), true);
+        }
+    }
+
+    private function onSettingCallback(TlNode $q, string $what, int $sender, int $queryId, string $lang): void
+    {
+        $chatId = $this->callbackChat($q);
+        if ($chatId === 0) {
+            $chatId = $sender;
+        }
+        if (!$this->isAdmin($chatId, $sender)) {
+            $this->answerQuery($queryId, $this->loc->get($lang, 'playmode_restricted'), true);
+            return;
+        }
+        $answer = $this->loc->get($lang, 'settings_updated');
+        switch ($what) {
+            case 'playmode':
+                $adminOnly = $this->db->playMode($chatId) !== 'admin';
+                $this->db->setPlayMode($chatId, $adminOnly ? 'admin' : 'everyone');
+                $answer = $this->loc->get($lang,
+                    $adminOnly ? 'playmode_success_admins' : 'playmode_success_everyone');
+                break;
+            case 'adminmode':
+                $v = !$this->db->adminMode($chatId);
+                $this->db->setAdminMode($chatId, $v);
+                $answer = $this->loc->f($lang, 'adminmode_updated', 'status',
+                    $this->loc->get($lang, $v ? 'adminmode_status_admin' : 'adminmode_status_everyone'));
+                break;
+            case 'nothumb':
+                $v = !$this->db->thumbnailsDisabled($chatId);
+                $this->db->setThumbnailsDisabled($chatId, $v);
+                $answer = $this->loc->f($lang, 'nothumb_updated', 'status',
+                    $this->loc->get($lang, $v ? 'disabled' : 'enabled'));
+                break;
+            case 'autoleave':
+                $v = !$this->db->autoLeave($chatId);
+                $this->db->setAutoLeave($chatId, $v);
+                $answer = $this->loc->get($lang, $v ? 'enabled' : 'disabled');
+                break;
+        }
+        $this->answerQuery($queryId, $answer, false);
+        $msgId = $q->i('msg_id');
+        if ($msgId > 0) {
+            $this->edit($chatId, $msgId, $this->t($chatId, 'settings_main', [
+                'title' => Util::escapeHtml($chatId > 0 ? 'ᴘʀɪᴠᴧᴛє ᴄʜᴧᴛ' : (string) $chatId),
+                'id' => (string) $chatId,
+            ]), Buttons::settingsKeyboard($this->loc, $this->lang($chatId), $this->db, $chatId));
         }
     }
 
@@ -1210,7 +2228,7 @@ final class App
             case 'replay':
                 if ($r->path !== '') {
                     $this->voice?->ntg->stop($chatId);
-                    $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
+                    $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false), 0, $r->speed);
                     if ($err === '') {
                         $r->position = 0;
                         $r->endStreak = 0;

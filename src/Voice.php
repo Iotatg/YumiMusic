@@ -153,7 +153,7 @@ final class Voice
      * Join (if needed) and start streaming a local file.
      * @return string error ("" on success)
      */
-    public function playFile(int $chatId, string $path, bool $video = false, int $pos = 0): string
+    public function playFile(int $chatId, string $path, bool $video = false, int $pos = 0, float $speed = 1.0): string
     {
         try {
             // A stale ntg connection (previous track/replay) makes create() fail
@@ -163,7 +163,7 @@ final class Voice
             } catch (Throwable $ignored) {
             }
             $cam = ($video && $this->videoEnabled) ? ['width' => 1280, 'height' => 720, 'fps' => 30] : null;
-            $audio = self::ffmpegAudioCmd($path, $pos);
+            $audio = self::ffmpegAudioCmd($path, $pos, $speed);
             // Sources BEFORE create make the SDP offer carry the video m-line —
             // but ntgcalls 3.x rejects them until the connection exists, so the
             // pre-set is best-effort and re-applied after create (like Nandani).
@@ -199,7 +199,7 @@ final class Voice
     }
 
     /** Shell pipeline: ffmpeg decodes the file to raw PCM on stdout (SOURCE_SHELL). */
-    private static function ffmpegAudioCmd(string $path, int $pos): string
+    private static function ffmpegAudioCmd(string $path, int $pos, float $speed = 1.0): string
     {
         $b = self::ffmpegBin() . ' ';
         if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
@@ -208,7 +208,23 @@ final class Voice
         if ($pos > 0) {
             $b .= "-ss $pos ";
         }
-        $b .= "-v warning -i \"$path\" -f s16le -ac 2 -ar 96000 pipe:1";
+        $b .= "-v warning -i \"$path\" ";
+        // atempo only accepts 0.5–2.0 per instance — chain it for faster rates.
+        $sp = $speed;
+        if ($sp > 1.001 || $sp < 0.999) {
+            $filters = [];
+            while ($sp > 2.0) {
+                $filters[] = 'atempo=2.0';
+                $sp /= 2.0;
+            }
+            while ($sp < 0.5) {
+                $filters[] = 'atempo=0.5';
+                $sp /= 0.5;
+            }
+            $filters[] = 'atempo=' . rtrim(rtrim(number_format($sp, 4, '.', ''), '0'), '.');
+            $b .= '-filter:a "' . implode(',', $filters) . '" ';
+        }
+        $b .= "-f s16le -ac 2 -ar 96000 pipe:1";
         return $b;
     }
 

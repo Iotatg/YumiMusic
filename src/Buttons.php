@@ -20,18 +20,32 @@ final class Buttons
         return self::$botUsername;
     }
 
-    private static function cb(string $text, string $data): TlNode
+    /**
+     * Native button colours (layer 230 `keyboardButtonStyle`), exactly like
+     * Nandani: every button independently gets primary / danger / success.
+     * Emoji squares are NOT used — the client paints the real background.
+     */
+    private static function style(int $force = 0): TlNode
     {
-        return (new TlNode('keyboardInlineButton'))
-            ->put('text', $text)
-            ->put('type', (new TlNode('inlineButtonTypeCallback'))->put('data', $data));
+        $s = $force !== 0 ? $force : random_int(1, 3);
+        $key = [1 => 'bg_primary', 2 => 'bg_danger', 3 => 'bg_success'][$s] ?? 'bg_primary';
+        return (new TlNode('keyboardButtonStyle'))->put($key, true);
     }
 
-    private static function url(string $text, string $url): TlNode
+    private static function cb(string $text, string $data, int $style = 0): TlNode
     {
         return (new TlNode('keyboardInlineButton'))
             ->put('text', $text)
-            ->put('type', (new TlNode('inlineButtonTypeUrl'))->put('url', $url));
+            ->put('type', (new TlNode('inlineButtonTypeCallback'))->put('data', $data))
+            ->put('style', self::style($style));
+    }
+
+    private static function url(string $text, string $url, int $style = 0): TlNode
+    {
+        return (new TlNode('keyboardInlineButton'))
+            ->put('text', $text)
+            ->put('type', (new TlNode('inlineButtonTypeUrl'))->put('url', $url))
+            ->put('style', self::style($style));
     }
 
     /** @param TlNode[][] $rows */
@@ -57,23 +71,23 @@ final class Buttons
 
         $all = [];
         if (!$queued) {
-            $all[] = [self::cb(Util::randColor() . ' ' . $progress, $prefix . 'progress')];
+            $all[] = [self::cb($progress, $prefix . 'progress')];
         }
         $all[] = [
-            self::cb(Util::randColor() . "\u{25B7}", $prefix . 'resume'),
-            self::cb(Util::randColor() . 'II', $prefix . 'pause'),
-            self::cb(Util::randColor() . "\u{27F3}", $prefix . 'replay'),
-            self::cb(Util::randColor() . "\u{2023}\u{2023}I", $prefix . 'skip'),
-            self::cb(Util::randColor() . "\u{25A2}", $prefix . 'stop'),
+            self::cb("\u{25B7}", $prefix . 'resume'),
+            self::cb('II', $prefix . 'pause'),
+            self::cb("\u{27F3}", $prefix . 'replay'),
+            self::cb("\u{2023}\u{2023}I", $prefix . 'skip'),
+            self::cb("\u{25A2}", $prefix . 'stop'),
         ];
         $all[] = [
-            self::cb(Util::randColor() . "-\u{1D7D8}\u{1D7D7}\u{02E2}", $prefix . 'seekback_15'),
-            self::cb("\u{1D7D8}\u{1D7D7}\u{02E2}+" . Util::randColor(), $prefix . 'seek_15'),
+            self::cb("-\u{1D7D8}\u{1D7D7}\u{02E2}", $prefix . 'seekback_15'),
+            self::cb("\u{1D7D8}\u{1D7D7}\u{02E2}+", $prefix . 'seek_15'),
         ];
         $state = $r->autoplay ? 'enabled' : 'disabled';
         $apText = $loc->f($lang, 'autoplay_btn', 'state', $loc->get($lang, $state));
-        $all[] = [self::cb(Util::randColor() . ' ' . $apText, $prefix . 'autoplay_toggle')];
-        $all[] = [self::cb(Util::randColor() . ' ' . $loc->get($lang, 'CLOSE_BTN'), $prefix . 'close')];
+        $all[] = [self::cb($apText, $prefix . 'autoplay_toggle')];
+        $all[] = [self::cb($loc->get($lang, 'CLOSE_BTN'), $prefix . 'close', 2)];
         return self::rows($all);
     }
 
@@ -96,7 +110,7 @@ final class Buttons
         $action = $r->paused ? 'resume' : 'unmute';
         return self::rows([[
             self::cb($loc->get($lang, $label), $prefix . $action),
-            self::cb($loc->get($lang, 'CONFIRM_STOP_BTN'), $prefix . 'stop'),
+            self::cb($loc->get($lang, 'CONFIRM_STOP_BTN'), $prefix . 'stop', 2),
         ]]);
     }
 
@@ -174,6 +188,29 @@ final class Buttons
             self::url($loc->get($lang, 'REPO_DEV_BTN'), $dev),
             self::url($loc->get($lang, 'REPO_BTN'), (string) (getenv('REPO_URL') ?: 'https://github.com/Iotatg/YumiMusic')),
         ]]);
+    }
+
+    public static function settingsKeyboard(Locales $loc, string $lang, Db $db, int $chatId): TlNode
+    {
+        $on = $loc->get($lang, 'enabled');
+        $off = $loc->get($lang, 'disabled');
+        $state = static fn(bool $v) => $v ? $on : $off;
+        return self::rows([
+            [self::cb($loc->get($lang, 'settings_btn_lang'), 'lang:menu')],
+            [self::cb($loc->get($lang, 'settings_btn_playmode') . ' — '
+                . $state($db->playMode($chatId) === 'admin'), 'set:playmode')],
+            [self::cb($loc->get($lang, 'settings_btn_adminmode') . ' — '
+                . $state($db->adminMode($chatId)), 'set:adminmode')],
+            [self::cb($loc->get($lang, 'settings_btn_nothumb') . ' — '
+                . $state($db->thumbnailsDisabled($chatId)), 'set:nothumb')],
+            [self::cb('🚪 ᴀᴜᴛᴏ ʟᴇᴀᴠᴇ — ' . $state($db->autoLeave($chatId)), 'set:autoleave')],
+            [self::cb($loc->get($lang, 'CLOSE_BTN'), 'close', 2)],
+        ]);
+    }
+
+    public static function closeKeyboard(Locales $loc, string $lang): TlNode
+    {
+        return self::rows([[self::cb($loc->get($lang, 'CLOSE_BTN'), 'close', 2)]]);
     }
 
     public static function langKeyboard(Locales $loc, string $lang): TlNode

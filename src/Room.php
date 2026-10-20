@@ -15,6 +15,7 @@ final class Room
     public bool $autoplay = false;
     public bool $loop = false;
     public int $loopLeft = 0;
+    public float $speed = 1.0;
     public int $statusMsg = 0;
 
     public function __construct(public readonly int $chatId)
