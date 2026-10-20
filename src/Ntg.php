@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * ntgcalls 3.0.4 FFI binding (synchronous C ABI) — audio via shell/ffmpeg
- * source, video via external frame pusher. Structs mirror include/ntgcalls.h.
+ * source, video via external frame pusher. Structs follow include/ntgcalls.h.
  */
 final class Ntg
 {

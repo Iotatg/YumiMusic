@@ -1151,7 +1151,7 @@ help_inline: "⊚ <b><u>ʙσᴛ ᴘʟᴧʏ ʙᴜᴛᴛση ᴅєᴛᴧɪʟs :</u
 
 cb_seek_failed: "❌ 𝐒‌єєᴋ 𝐅‌ᴧɪʟєᴅ!\n\n<blockquote>❖ ᴇꝛꝛσꝛ: <code>{error}</code></blockquote>"
 
-# ── Nandani additions: messages the original emitted as inline strings ────────
+# ── extra message templates ──────────────────────────────────────────────────
 repo_text: |
   <blockquote expandable><b>❖ 𝐇‌єʏ 𝐓‌ʜєꝛє, 𝐍‌ɪᴄє 𝐓‌σ 𝐌‌єєᴛ 𝐘‌συ! ♡</b>
 

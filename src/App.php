@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 /**
- * YumiMusic application — exact Nandani-parity UI/UX engine:
- * Locales templates (Nandani en.yml), signature stylish() outputs,
+ * YumiMusic application — UI/UX engine:
+ * Locales templates, signature stylish() outputs,
  * photo now-playing cards with progress-bar button rows, help
  * sections, language picker, autoplay panel, stop-confirm — all
  * driven through raw MTProto on the single cooperative process.
@@ -66,7 +66,7 @@ final class App
         $this->botPeers->supportsDialogs = false; // bots can't getDialogs — updates only
         $this->bot->onUpdate = fn(TlNode $u) => $this->onBotUpdate($u);
 
-        // ── assistant client (session import from Nandani env) ──
+        // ── assistant client (userbot session from env) ──
         if ($vcEnabled && $assistantSession !== null) {
             $mt = new MtProto($apiId, $apiHash, 2);
             $mt->tag = 'yumi-assistant';
@@ -375,7 +375,7 @@ final class App
     // ── commands ─────────────────────────────────────────────────────────────
 
     /**
-     * Nandani ships the same handler under several names — channel-scoped
+     * The same handler is exposed under several names — channel-scoped
      * (`cplay`, `cskip`), force (`playforce`), video (`vplay`, `vcplay`) and
      * legacy spellings. Normalising here keeps one implementation per action
      * instead of a switch arm for every synonym.
@@ -503,7 +503,7 @@ final class App
                 return;
             case '/mute':
             case '/unmute':
-                // volume is server-side in ntgcalls — mirror to pause/resume
+                // volume is server-side in ntgcalls — map to pause/resume
                 if ($cmd === '/mute') {
                     $this->dispatch($chatId, $sender, '/pause', $arg, $msg);
                 } else {
@@ -521,7 +521,7 @@ final class App
                     $this->send($chatId, $this->t($chatId, 'stopped', ['user' => $this->mention($sender)]));
                     return;
                 }
-                // Nandani confirm card: paused → resume-or-stop
+                // Stop confirm card: paused → resume-or-stop
                 $this->send($chatId, $this->t($chatId, $r->paused ? 'stop_confirm_paused' : 'stop_confirm_muted'), 0,
                     Buttons::stopConfirmMarkup($this->loc, $this->lang($chatId), $r));
                 return;
@@ -795,7 +795,7 @@ final class App
                 $this->cmdSetWarnMode($chatId, $sender, $arg);
                 return;
 
-            // ── chat settings (Nandani AdminModule) ──────────────────────────
+            // ── chat settings ────────────────────────────────────────────────
             case '/playmode':
                 $this->cmdPlayMode($chatId, $sender, $arg);
                 return;
@@ -917,7 +917,7 @@ final class App
         ]), 0, Buttons::settingsKeyboard($this->loc, $lang, $this->db, $chatId));
     }
 
-    // ── chat settings (AdminModule parity) ───────────────────────────────────
+    // ── chat settings ────────────────────────────────────────────────────────
 
     private function canManageSettings(int $chatId, int $sender): bool
     {
@@ -1550,7 +1550,7 @@ final class App
     private function cmdPlay(int $chatId, int $sender, string $arg, bool $vcVideo, int $replyTo = 0, int $replied = 0): void
     {
         if ($arg === '') {
-            // Nandani parity: no arg + no reply → usage template; empty query
+            // No arg + no reply → usage template; empty query
             // with reply → searching then no_song_found (resolveQuery("") = []).
             if ($replied === 0) {
                 $this->send($chatId, $this->t($chatId, $vcVideo ? 'vplay_usage' : 'no_song_query'), $replyTo);
@@ -1695,7 +1695,7 @@ final class App
         }
         $secs = (int) $arg;
         $dur = (int) ($r->track['duration'] ?? 0);
-        // Nandani semantics: /seek N jumps to absolute second N; /seekback N rewinds N.
+        // /seek N jumps to absolute second N; /seekback N rewinds N seconds.
         $target = $back ? max(0, $r->position - $secs) : min($dur > 0 ? $dur : $secs, $secs);
         if (!$back && $dur > 0 && $secs > $dur - 5) {
             $this->send($chatId, $this->t($chatId, 'seek_too_close_end', ['seconds' => (string) $secs]));
@@ -1880,7 +1880,7 @@ final class App
         echo "[yumi] card msg id: {$r->statusMsg}\n";
     }
 
-    /** Nandani photo now-playing card (falls back to a text card). */
+    /** Photo now-playing card (falls back to a text card). */
     private function nowPlayingCard(int $chatId, Room $r, int $sender): int
     {
         $t = $r->track ?? [];
@@ -2024,7 +2024,7 @@ final class App
             } else {
                 $r->endStreak = 0;
             }
-            // Nandani refreshes the progress button every 5s (markup-only edit)
+            // Refresh the progress button every 5s (markup-only edit)
             if ($r->position % 5 === 0 && $r->statusMsg !== 0) {
                 $this->editMarkup($chatId, $r->statusMsg, $this->playMarkup($r));
             }
@@ -2179,7 +2179,7 @@ final class App
     private function onRoomCallback(TlNode $q, int $chatId, string $action, string $p4, int $sender, string $lang): void
     {
         $queryId = $q->l('query_id');
-        // Nandani: all playback buttons are admin-only
+        // Playback buttons are admin-only
         if (!in_array($action, ['progress', 'close'], true) && !$this->isAdmin($chatId, $sender)) {
             $this->answerQuery($queryId, $this->loc->get($lang, 'playmode_restricted'), true);
             return;

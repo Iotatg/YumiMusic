@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * Lightweight per-chat settings store (JSON on disk) — the Yumi counterpart
- * of Nandani's Database module for the settings the bot actually uses.
+ * for the settings the bot actually uses.
  */
 final class Db
 {

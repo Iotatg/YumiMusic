@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Inline keyboard builders — exact port of Nandani's Buttons.java
+ * Inline keyboard builders
  * (layer-230 inline button nodes).
  */
 final class Buttons
@@ -22,7 +22,7 @@ final class Buttons
 
     /**
      * Native button colours (layer 230 `keyboardButtonStyle`), exactly like
-     * Nandani: every button independently gets primary / danger / success.
+     * Every button independently gets primary / danger / success.
      * Emoji squares are NOT used — the client paints the real background.
      */
     private static function style(int $force = 0): TlNode

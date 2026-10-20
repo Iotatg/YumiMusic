@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Pure formatting/parsing helpers — exact port of Nandani's Util.java,
+ * Pure formatting/parsing helpers — time, sizes, progress bars,
  * including the signature stylish() output style (math-bold capital +
  * ZWNJ word starts + small caps bodies).
  */
@@ -116,7 +116,7 @@ final class Util
         return self::escapeHtml($s);
     }
 
-    /** Random colored square for buttons (Nandani-parity colored accents). */
+    /** Random coloured accent for buttons. */
     public static function randColor(): string
     {
         $c = ["\u{1F7E5}", "\u{1F7E6}", "\u{1F7E7}", "\u{1F7E8}", "\u{1F7E9}", "\u{1F7EA}", "\u{1F7EB}"];

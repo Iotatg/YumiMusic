@@ -23,6 +23,8 @@ final class MtProto
 
     /** @var MtProto[] all live clients pumped together */
     private static array $clients = [];
+    /** @var array<string, int> unknown ctor message → hit count (log once) */
+    private static array $unknownCtor = [];
 
     public string $host;
     public int $port;
@@ -593,13 +595,53 @@ final class MtProto
         try {
             $n = TlCodec::read($body);
         } catch (Throwable $e) {
-            echo "[{$this->tag}] cannot parse update: " . $e->getMessage() . "\n";
+            // Unknown constructors arrive constantly on busy accounts (new
+            // server-side update types). Log each one once, never spam.
+            $key = $e->getMessage();
+            if (str_contains($key, 'unknown constructor')) {
+                if (!isset(self::$unknownCtor[$key])) {
+                    self::$unknownCtor[$key] = 0;
+                    echo "[{$this->tag}] {$key} (further occurrences silenced)\n";
+                }
+                self::$unknownCtor[$key]++;
+                return;
+            }
+            echo "[{$this->tag}] cannot parse update: " . $key . "\n";
             return;
         }
+        try {
+            $this->dispatch($n);
+        } catch (Throwable $e) {
+            // A single unparseable update must never abort an in-flight RPC.
+            $this->noteUnknown($e);
+        }
+    }
+
+    /** Log unknown-constructor noise once per signature. */
+    private function noteUnknown(Throwable $e): void
+    {
+        $key = $e->getMessage();
+        if (str_contains($key, 'unknown constructor')) {
+            if (!isset(self::$unknownCtor[$key])) {
+                self::$unknownCtor[$key] = 0;
+                echo "[{$this->tag}] {$key} (further occurrences silenced)\n";
+            }
+            self::$unknownCtor[$key]++;
+            return;
+        }
+        echo "[{$this->tag}] cannot parse update: " . $key . "\n";
+    }
+
+    private function dispatch(TlNode $n): void
+    {
         switch ($n->name) {
             case 'msg_container':
                 foreach ($n->list('messages') as $m) {
-                    $this->handle($m->bytes('body'));
+                    try {
+                        $this->handle($m->bytes('body'));
+                    } catch (Throwable $e) {
+                        $this->noteUnknown($e);
+                    }
                 }
                 return;
             case 'gzip_packed':
@@ -613,7 +655,19 @@ final class MtProto
                 $res = $n->node('result');
                 if ($res !== null && $res->name === 'gzip_packed') {
                     $inner = gzdecode($res->bytes('packed_data'));
-                    $res = $inner === false ? null : TlCodec::read($inner);
+                    try {
+                        $res = $inner === false ? null : TlCodec::read($inner);
+                    } catch (Throwable $e) {
+                        if (getenv('YUMI_DUMP_RAW')) {
+                            echo "[{$this->tag}] raw($reqId)=" . bin2hex(substr((string) $inner, 0, 600)) . "\n";
+                        }
+                        $slot = $this->pending[$reqId] ?? null;
+                        if ($slot !== null) {
+                            $slot->err = $e->getMessage();
+                            $slot->done = true;
+                        }
+                        return;
+                    }
                 }
                 $slot = $this->pending[$reqId] ?? null;
                 if ($slot === null) {
@@ -664,7 +718,6 @@ final class MtProto
                 echo "[{$this->tag}] bad_msg " . $n->i('error_code') . " for " . $n->l('bad_msg_id') . "\n";
                 return;
             case 'msgs_ack':
-            case 'pong':
             case 'msgs_state_info':
             case 'msgs_all_info':
                 return;

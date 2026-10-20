@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * Voice engine per assistant: ntgcalls instance + VC join/leave/play.
- * Mirrors the proven flow: stream sources configured BEFORE ntg_create so the
+ * Streaming flow: sources are configured BEFORE ntg_create so the
  * SDP offer carries the video m-line (Telegram discards video frames from
  * audio-only offers), then phone.joinGroupCall(offer) → ntg_connect(answer).
  */
@@ -37,29 +37,46 @@ final class Voice
 
     private function groupCall(int $chatId): ?TlNode
     {
-        try {
-            if ($chatId <= -1000000000000) {
-                $cid = (int) substr((string) $chatId, 4);
-                $res = $this->mt->invoke((new TlNode('channels.getFullChannel'))
-                    ->put('channel', $this->peers->inputPeer($chatId)), 25);
-                $call = $res->node('full_chat')->node('call');
-            } else {
-                $res = $this->mt->invoke((new TlNode('messages.getFullChat'))
-                    ->put('chat_id', -$chatId), 25);
-                $call = $res->node('full_chat')->node('call');
+        // Transient parse/transport hiccups and stale peer caches are common
+        // right after a reconnect, so the lookup gets three attempts: refresh
+        // the peer cache, then reopen the socket, then give up.
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                if ($chatId <= -1000000000000) {
+                    $res = $this->mt->invoke((new TlNode('channels.getFullChannel'))
+                        ->put('channel', $this->peers->inputPeer($chatId)), 25);
+                    $call = $res->node('full_chat')->node('call');
+                } else {
+                    $res = $this->mt->invoke((new TlNode('messages.getFullChat'))
+                        ->put('chat_id', -$chatId), 25);
+                    $call = $res->node('full_chat')->node('call');
+                }
+                if ($call === null || $call->name !== 'inputGroupCall') {
+                    echo "[{$this->tag}] no active call in $chatId\n";
+                    return null;
+                }
+                $this->groupCalls[$chatId] = $call;
+                return $call;
+            } catch (Throwable $e) {
+                echo "[{$this->tag}] groupCall $chatId (try " . ($attempt + 1) . "): " . $e->getMessage() . "\n";
+                if ($attempt === 0) {
+                    try {
+                        $this->peers->refresh();
+                    } catch (Throwable $e2) {
+                        echo "[{$this->tag}] peer refresh failed: " . $e2->getMessage() . "\n";
+                    }
+                } else {
+                    try {
+                        $this->mt->close();
+                        $this->mt->connect();
+                    } catch (Throwable $e2) {
+                        echo "[{$this->tag}] reconnect failed: " . $e2->getMessage() . "\n";
+                    }
+                }
+                usleep(300000);
             }
-            if ($call === null || $call->name !== 'inputGroupCall') {
-                echo "[{$this->tag}] no active call in $chatId\n";
-                return null;
-            }
-            $this->groupCalls[$chatId] = $call;
-            return $call;
-        } catch (Throwable $e) {
-            echo "[{$this->tag}] groupCall $chatId: " . $e->getMessage() . "\n";
-            // peer cache may be stale
-            $this->peers->refresh();
-            return null;
         }
+        return null;
     }
 
     /** @return string SDP answer ("" on failure) */
@@ -166,7 +183,7 @@ final class Voice
             $audio = self::ffmpegAudioCmd($path, $pos, $speed);
             // Sources BEFORE create make the SDP offer carry the video m-line —
             // but ntgcalls 3.x rejects them until the connection exists, so the
-            // pre-set is best-effort and re-applied after create (like Nandani).
+            // pre-set is best-effort and re-applied after create.
             $pre = true;
             try {
                 $this->ntg->setStreamSources($chatId, $audio, $cam);

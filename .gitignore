@@ -4,3 +4,5 @@ data/
 nohup.out
 .idea/
 *.iml
+test_*.php
+*.session

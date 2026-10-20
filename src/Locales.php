@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * YAML localization engine — exact port of Nandani's Locales.java.
+ * YAML localization engine — flat key/value locale packs.
  * Flat-YAML parser: `key:` at column 0; quoted or plain scalars;
  * block scalars `|` (keep newlines) and `>` (fold to spaces).
  */
