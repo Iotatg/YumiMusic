@@ -11,6 +11,8 @@ declare(strict_types=1);
  */
 final class App
 {
+    use Extras;
+
     public MtProto $bot;
     public Peers $botPeers;
     public ?Voice $voice = null;
@@ -22,6 +24,7 @@ final class App
     private string $botName;
     private string $ntgVer = '3.0.4';
     private string $assistantUser = '';
+    private int $botId = 0;
     private bool $maint = false;
 
     /** @var array<int, Room> */
@@ -115,7 +118,13 @@ final class App
         if ($fresh) {
             $this->bot->handshake();
         }
-        $this->authorizeBot();
+        // A stored session is already authorised — re-running
+        // auth.importBotAuthorization on every boot burns a FLOOD_WAIT and
+        // stalls startup for minutes. Probe first, log in only when the key
+        // is genuinely unusable.
+        if (!$this->probeAuthorized()) {
+            $this->authorizeBot();
+        }
 
         if (isset($this->voice)) {
             $amt = $this->voice->mt;
@@ -128,9 +137,31 @@ final class App
         echo "[yumi] ready — owner={$this->ownerId} vc=" . ($this->vcEnabled ? 'on' : 'off') . "\n";
     }
 
-    private function authorizeBot(): void
+    /** True when the imported auth key already belongs to a live bot session. */
+    private function probeAuthorized(): bool
     {
-        $sessFile = dirname(__DIR__) . '/data/bot.session';
+        try {
+            $me = $this->bot->invoke((new TlNode('users.getFullUser'))
+                ->put('id', new TlNode('inputUserSelf')), 15);
+        } catch (Throwable $e) {
+            echo '[yumi-bot] session probe failed: ' . substr($e->getMessage(), 0, 90) . "\n";
+            return false;
+        }
+        foreach ($me->list('users') as $u) {
+            if ($u instanceof TlNode && $u->name === 'user' && $u->l('id') > 0) {
+                $this->botId = (int) $u->l('id');
+                echo "[yumi-bot] session restored — @{$u->str('username')} ({$u->l('id')})\n";
+                if ($u->str('username') !== '') {
+                    Buttons::setBotUsername($u->str('username'));
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function authorizeBot(): void
+    {        $sessFile = dirname(__DIR__) . '/data/bot.session';
         for ($i = 0; $i < 5; $i++) {
             try {
                 $res = $this->bot->invoke((new TlNode('auth.importBotAuthorization'))
@@ -144,6 +175,7 @@ final class App
                         ->put('id', new TlNode('inputUserSelf')), 20);
                     foreach ($me->list('users') as $u) {
                         if ($u instanceof TlNode && $u->name === 'user') {
+                            $this->botId = (int) $u->l('id');
                             echo "[yumi-bot] logged in as {$u->str('first_name')} @{$u->str('username')} ({$u->l('id')})\n";
                             if ($u->str('username') !== '') {
                                 Buttons::setBotUsername($u->str('username'));
@@ -214,6 +246,13 @@ final class App
                 ['unban', 'υηʙᴧη ᴧ υsєʀ'], ['kick', 'ᴋɪᴄᴋ ᴧ υsєʀ'],
                 ['purge', 'ᴅєʟєᴛє ᴍєssᴧɢєs'], ['pin', 'ᴘɪη ᴧ ᴍєssᴧɢє'],
                 ['privacy', 'ᴘʀɪᴠᴧᴄʏ ɪηғσ'], ['repo', 'sσυʀᴄє ᴄσᴅє'],
+                ['save', 'sᴧᴠє ᴧ ησᴛє'], ['get', 'sʜσᴡ ᴧ ησᴛє'],
+                ['notes', 'ʟɪsᴛ sᴧᴠєᴅ ησᴛєs'], ['filter', 'ᴧᴅᴅ ᴧη ᴧυᴛσ ʀєᴘʟʏ'],
+                ['filters', 'ʟɪsᴛ ғɪʟᴛєʀs'], ['myplaylists', 'ʏσυʀ ᴘʟᴧʏʟɪsᴛs'],
+                ['createplaylist', 'ηєω ᴘʟᴧʏʟɪsᴛ'], ['addtoplaylist', 'ᴧᴅᴅ ᴧ ᴛʀᴧᴄᴋ'],
+                ['welcome', 'ᴛσɢɢʟє ωєʟᴄσᴍє'], ['promote', 'ᴘʀσᴍσᴛє ᴧ ᴍєᴍʙєʀ'],
+                ['demote', 'ᴅєᴍσᴛє ᴧ ᴍєᴍʙєʀ'], ['cleanmode', 'ᴧυᴛσ-ᴅєʟєᴛє ᴄᴏᴍᴍᴀɴᴅs'],
+                ['blacklisted', 'ɢʟσʙᴧʟ ʙʟᴧᴄᴋʟɪsᴛ'],
             ];
             $vectors = [];
             foreach ($names as [$cmd, $desc]) {
@@ -293,33 +332,75 @@ final class App
             return;
         }
         $chatId = $this->peerChatId($peer);
-        $action = $msg->node('action');
-        if ($action === null || $action->name !== 'messageActionGroupCall') {
+        if ($this->db->isBlockedChat($chatId)) {
             return;
         }
-        if ($action->has('duration')) {
-            $this->send($chatId, $this->t($chatId, 'voicechat_ended', [
-                'duration' => Util::formatTime($action->i('duration')),
-            ]));
-            $this->dropRoom($chatId);
-        } else {
-            $this->send($chatId, $this->t($chatId, 'voicechat_started'));
+        $action = $msg->node('action');
+        if ($action === null) {
+            return;
+        }
+        if ($action->name === 'messageActionGroupCall') {
+            if ($action->has('duration')) {
+                $this->send($chatId, $this->t($chatId, 'voicechat_ended', [
+                    'duration' => Util::formatTime($action->i('duration')),
+                ]));
+                $this->dropRoom($chatId);
+            } else {
+                $this->send($chatId, $this->t($chatId, 'voicechat_started'));
+            }
+            return;
+        }
+        // Welcome greeting for joins.
+        $users = [];
+        if ($action->name === 'messageActionChatAddUser') {
+            foreach ($action->list('users') as $u) {
+                $users[] = (int) $u;
+            }
+        } elseif ($action->name === 'messageActionChatJoinedByLink') {
+            $inviter = $action->l('inviter_id');
+            if ($inviter !== 0) {
+                $users[] = $inviter;
+            }
+        }
+        if ($users !== []) {
+            $this->maybeWelcome($chatId, $users, $this->chatTitle($chatId));
         }
     }
 
     private function onBotMessage(TlNode $msg): void
     {
+        $peer = $msg->node('peer_id');
+        $chatId = $this->peerChatId($peer);
+        $sender = $this->senderId($msg);
+        $msgId = $msg->i('id');
+
+        // Global blacklist: blocked chats are ignored, blocked users have
+        // every message removed.
+        if ($this->db->isBlockedChat($chatId)) {
+            return;
+        }
+        if ($this->db->isBlockedUser($sender)) {
+            $this->deleteMsgs($chatId, [$msgId]);
+            return;
+        }
+
         $text = $msg->str('message');
         if ($text === '' || $text === null) {
             return;
         }
-        $peer = $msg->node('peer_id');
-        $chatId = $this->peerChatId($peer);
-        $sender = $this->senderId($msg);
         $cmd = strtolower(explode('@', explode(' ', trim($text))[0], 2)[0]);
+        if ($cmd === '' || $cmd[0] !== '/') {
+            $this->onPlainMessage($chatId, $sender, $text, $msgId);
+            return;
+        }
         $arg = trim(preg_replace('/^\/[a-z0-9_]+(@\w+)?\s*/i', '', $text));
         Locales::setCurrentCommand($cmd);
         echo "[yumi] chat=$chatId user=$sender cmd=$cmd\n";
+        if ($chatId > 0 && $this->isGroupOnly($cmd)) {
+            $this->send($chatId, $this->t($chatId, 'groups_only'));
+            Locales::setCurrentCommand(null);
+            return;
+        }
         if ($this->maint && $sender !== $this->ownerId && !in_array($cmd, ['/start', '/help', '/ping', '/alive'], true)) {
             $this->send($chatId, "🛠️ <b>𝐁‌σᴛ 𝐈‌s υηᴅєʀ 𝐌‌ᴧɪηᴛєηᴧηᴄє</b>\n\n"
                 . '<blockquote>ᴘʟєᴧsє ᴛʀʏ ᴧɢᴧɪη ɪη ᴧ ғєᴡ ᴍɪηυᴛєs.</blockquote>');
@@ -334,7 +415,30 @@ final class App
                 'error' => Util::escapeHtml($e->getMessage()),
             ]), $msg->i('id'));
         }
+        // Clean mode removes command messages 15 s after they are handled.
+        if ($this->db->cleanMode($chatId)) {
+            $this->pendingDeletes[] = [$chatId, $msgId, time() + 15];
+        }
         Locales::setCurrentCommand(null);
+    }
+
+    /** @var array<int, array{0:int,1:int,2:int}> [chatId, msgId, dueTs] */
+    private array $pendingDeletes = [];
+
+    private function flushPendingDeletes(int $now): void
+    {
+        if ($this->pendingDeletes === []) {
+            return;
+        }
+        $keep = [];
+        foreach ($this->pendingDeletes as $p) {
+            if ($p[2] <= $now) {
+                $this->deleteMsgs($p[0], [$p[1]]);
+            } else {
+                $keep[] = $p;
+            }
+        }
+        $this->pendingDeletes = $keep;
     }
 
     private function isAdmin(int $chatId, int $sender): bool
@@ -350,7 +454,13 @@ final class App
             if ($peer->name === 'inputPeerChat') {
                 $full = $this->bot->invoke((new TlNode('messages.getFullChat'))
                     ->put('chat_id', -$chatId), 20);
-                foreach ($full->list('full_chat')->list('participants') ?? [] as $p) {
+                // chatFull.participants is a chatParticipants wrapper — the
+                // member vector lives one level deeper. Flattening that
+                // wrongly made every legacy-group admin look unauthorised.
+                $participants = $full->node('full_chat')
+                    ?->node('participants')
+                    ?->list('participants') ?? [];
+                foreach ($participants as $p) {
                     if ($p instanceof TlNode && $p->l('user_id') === $sender) {
                         return in_array($p->name, ['chatParticipantAdmin', 'chatParticipantCreator'], true);
                     }
@@ -359,10 +469,11 @@ final class App
             }
             $res = $this->bot->invoke((new TlNode('channels.getParticipant'))
                 ->put('channel', $peer)
-                ->put('participant', (new TlNode('inputPeerUser'))->put('user_id', $sender)->put('access_hash', 0)), 20);
-            $role = $res->node('participant')->name;
+                ->put('participant', $this->botPeers->inputPeer($sender)), 20);
+            $role = $res->node('participant')?->name ?? '';
             return in_array($role, ['channelParticipantAdmin', 'channelParticipantCreator'], true);
         } catch (Throwable $e) {
+            echo "[yumi] admin check failed chat=$chatId user=$sender: " . $e->getMessage() . "\n";
             return false;
         }
     }
@@ -391,16 +502,15 @@ final class App
         '/cend' => '/stop', '/cseek' => '/seek', '/cseekback' => '/seekback',
         '/cloop' => '/loop', '/cshuffle' => '/shuffle', '/cspeed' => '/speed',
         '/csetspeed' => '/setspeed', '/cspeedup' => '/speedup', '/cjump' => '/jump',
-        '/cmove' => '/move', '/cremove' => '/remove', '/cclear' => '/clear',
+        '/cmove' => '/move', '/cremove' => '/remove',
         '/cqueue' => '/queue', '/cpos' => '/position', '/cposition' => '/position',
         '/creplay' => '/replay', '/cmute' => '/mute', '/cunmute' => '/unmute',
         '/creload' => '/reload', '/activevoice' => '/ac', '/activevc' => '/ac',
         '/active' => '/ac', '/vcstats' => '/vcstatus', '/nothumbs' => '/nothumb',
         '/language' => '/lang', '/source' => '/repo', '/sudoadd' => '/addsudo',
-        '/sudodel' => '/rmsudo', '/sudolist' => '/sudo', '/sudorem' => '/rmsudo',
-        '/dropsudo' => '/rmsudo', '/gcast' => '/bcast', '/bcast' => '/broadcast',
-        '/maintenance' => '/maint', '/clearstickers' => '/clear',
-        '/clearnote' => '/clear', '/clearfilters' => '/clear',
+        '/gcast' => '/bcast', '/bcast' => '/broadcast',
+        '/maintenance' => '/maint', '/setloop' => '/loop', '/pos' => '/position',
+        '/plistinfo' => '/playlistinfo', '/whitelistuser' => '/unblockuser',
     ];
 
     private function dispatch(int $chatId, int $sender, string $cmd, string $arg, TlNode $msg): void
@@ -536,6 +646,10 @@ final class App
                 $this->cmdQueue($chatId);
                 return;
             case '/clear':
+                $this->cmdNoteDelete($chatId, $arg);
+                return;
+            case '/cclear':
+            case '/clearqueue':
                 $r = $this->rooms[$chatId] ?? null;
                 if ($r !== null) {
                     $r->queue = [];
@@ -719,29 +833,11 @@ final class App
             case '/auth':
             case '/addauth':
             case '/authorize':
-            case '/addsudo':
-            case '/addsudoer':
-            case '/sudo':
-            case '/sudoers':
-            case '/sudolist':
-            case '/listsudo':
-                if (in_array($cmd, ['/sudo', '/sudoers', '/sudolist', '/listsudo'], true)) {
-                    $this->send($chatId, '<b>🛡️ 𝐒‌υᴅσ 𝐔‌sєʀs</b>'
-                        . "\n\n<blockquote>❖ σᴡηєʀ: " . $this->mention($this->ownerId)
-                        . "\n➥ ʀєsᴛ ɪs ᴍᴧηᴧɢєᴅ ʙʏ ᴛʜє ʙσᴛ σᴡηєʀ ᴘᴧηєʟ.</blockquote>");
-                    return;
-                }
                 $this->cmdAuth($chatId, $sender, $arg, $msg, true);
                 return;
             case '/unauth':
             case '/delauth':
             case '/delauthuser':
-            case '/delsudo':
-            case '/delsudoer':
-            case '/rmsudo':
-            case '/remsudo':
-            case '/sudodel':
-            case '/sudorem':
                 $this->cmdAuth($chatId, $sender, $arg, $msg, false);
                 return;
             case '/authlist':
@@ -749,19 +845,46 @@ final class App
                 $this->cmdAuthList($chatId);
                 return;
 
+            // ── global sudo ──────────────────────────────────────────────────
+            case '/addsudo':
+            case '/addsudoer':
+            case '/sudoadd':
+                $this->cmdSudo($chatId, $sender, $arg, $msg, true);
+                return;
+            case '/delsudo':
+            case '/delsudoer':
+            case '/rmsudo':
+            case '/remsudo':
+            case '/sudodel':
+            case '/sudorem':
+            case '/dropsudo':
+                $this->cmdSudo($chatId, $sender, $arg, $msg, false);
+                return;
+            case '/sudo':
+            case '/sudoers':
+            case '/sudolist':
+            case '/listsudo':
+                $this->cmdSudoList($chatId);
+                return;
+
             // ── moderation ───────────────────────────────────────────────────
             case '/ban':
+                $this->cmdBan($chatId, $sender, $arg, $msg, 'ban');
+                return;
+            case '/unban':
+                $this->cmdBan($chatId, $sender, $arg, $msg, 'unban');
+                return;
             case '/blockuser':
             case '/blacklistuser':
             case '/bluser':
             case '/blackuser':
-                $this->cmdBan($chatId, $sender, $arg, $msg, 'ban');
+                $this->cmdBlockUser($chatId, $sender, $arg, $msg, true);
                 return;
-            case '/unban':
             case '/unblockuser':
             case '/unblacklistuser':
             case '/unbluser':
-                $this->cmdBan($chatId, $sender, $arg, $msg, 'unban');
+            case '/whitelistuser':
+                $this->cmdBlockUser($chatId, $sender, $arg, $msg, false);
                 return;
             case '/kick':
                 $this->cmdBan($chatId, $sender, $arg, $msg, 'kick');
@@ -814,9 +937,95 @@ final class App
             case '/reload':
                 $this->cmdReload($chatId, $sender);
                 return;
+            // ── notes ────────────────────────────────────────────────────────
             case '/save':
-                $this->db->save();
-                $this->send($chatId, '💾 <b>𝐒‌єᴛᴛɪηɢs 𝐒‌ᴧᴠєᴅ</b>');
+                $this->cmdNoteSave($chatId, $arg);
+                return;
+            case '/get':
+                $this->cmdNoteGet($chatId, $arg);
+                return;
+            case '/notes':
+                $this->cmdNoteList($chatId);
+                return;
+            case '/clearnote':
+                $this->cmdNoteDelete($chatId, $arg);
+                return;
+
+            // ── filters ──────────────────────────────────────────────────────
+            case '/filter':
+                $this->cmdFilterSave($chatId, $sender, $arg);
+                return;
+            case '/filters':
+                $this->cmdFilterList($chatId);
+                return;
+            case '/stopfilter':
+                $this->cmdFilterStop($chatId, $sender, $arg);
+                return;
+            case '/clearfilters':
+                $this->cmdFilterClear($chatId, $sender);
+                return;
+
+            // ── playlists ────────────────────────────────────────────────────
+            case '/createplaylist':
+                $this->cmdPlaylistCreate($chatId, $sender, $arg);
+                return;
+            case '/deleteplaylist':
+                $this->cmdPlaylistDelete($chatId, $sender, $arg);
+                return;
+            case '/addtoplaylist':
+                $this->cmdPlaylistAdd($chatId, $sender, $arg);
+                return;
+            case '/removefromplaylist':
+                $this->cmdPlaylistRemove($chatId, $sender, $arg);
+                return;
+            case '/playlistinfo':
+            case '/plistinfo':
+                $this->cmdPlaylistInfo($chatId, $sender, $arg);
+                return;
+            case '/myplaylists':
+                $this->cmdPlaylistList($chatId, $sender);
+                return;
+
+            // ── admin: promote / welcome / clean mode / logger ───────────────
+            case '/promote':
+            case '/fullpromote':
+                $this->cmdPromote($chatId, $sender, $arg, $msg, false);
+                return;
+            case '/demote':
+            case '/unpromote':
+                $this->cmdPromote($chatId, $sender, $arg, $msg, true);
+                return;
+            case '/welcome':
+                $this->cmdWelcome($chatId, $sender, $arg);
+                return;
+            case '/cleanmode':
+            case '/cmddelete':
+                $this->cmdCleanMode($chatId, $sender, $arg);
+                return;
+            case '/logger':
+            case '/logs':
+            case '/log':
+            case '/vclog':
+            case '/vclogger':
+                $this->cmdLogger($chatId, $sender, $arg);
+                return;
+
+            // ── global blacklist ─────────────────────────────────────────────
+            case '/blockchat':
+            case '/blackchat':
+            case '/blchat':
+            case '/blacklistchat':
+                $this->cmdBlockChat($chatId, $sender, true);
+                return;
+            case '/unblockchat':
+            case '/whitechat':
+            case '/unblchat':
+            case '/unblacklistchat':
+                $this->cmdBlockChat($chatId, $sender, false);
+                return;
+            case '/blacklisted':
+            case '/blocked':
+                $this->cmdBlacklisted($chatId);
                 return;
             case '/bug':
                 $this->cmdBug($chatId, $sender, $arg);
@@ -1592,6 +1801,7 @@ final class App
             }
             $t['req'] = $sender;
             $r->queue[] = $t;
+            $this->logPlayback($chatId, $sender, (string) $t['title'], $this->trackUrl($t), true);
             $this->send($chatId, $this->t($chatId, 'play_added_to_queue_single', [
                 'index' => (string) count($r->queue),
                 'title' => Util::escapeHtml($t['title']),
@@ -1878,6 +2088,7 @@ final class App
         $r->playing = true;
         $r->statusMsg = $this->nowPlayingCard($chatId, $r, $sender);
         echo "[yumi] card msg id: {$r->statusMsg}\n";
+        $this->logPlayback($chatId, $sender, (string) $t['title'], $this->trackUrl($t), false);
     }
 
     /** Photo now-playing card (falls back to a text card). */
@@ -2039,6 +2250,7 @@ final class App
         if ($now !== $this->lastTick) {
             $this->lastTick = $now;
             $this->tick();
+            $this->flushPendingDeletes($now);
         }
         if ($now - $this->lastPing >= 45) {
             $this->lastPing = $now;

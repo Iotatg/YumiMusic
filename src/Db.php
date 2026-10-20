@@ -220,6 +220,308 @@ final class Db
         $this->set($chatId, 'warnmode', $m);
     }
 
+    // ── notes ────────────────────────────────────────────────────────────────
+
+    /** @return array<string,string> name → body */
+    public function notes(int $chatId): array
+    {
+        $n = $this->chat($chatId)['notes'] ?? [];
+        return is_array($n) ? $n : [];
+    }
+
+    public function note(int $chatId, string $name): string
+    {
+        return (string) ($this->notes($chatId)[$name] ?? '');
+    }
+
+    public function setNote(int $chatId, string $name, string $text): void
+    {
+        $c = $this->chat($chatId);
+        $c['notes'][$name] = $text;
+        $this->data['chat:' . $chatId] = $c;
+        $this->save();
+    }
+
+    public function delNote(int $chatId, string $name): bool
+    {
+        $c = $this->chat($chatId);
+        if (!isset($c['notes'][$name])) {
+            return false;
+        }
+        unset($c['notes'][$name]);
+        $this->data['chat:' . $chatId] = $c;
+        $this->save();
+        return true;
+    }
+
+    // ── filters ──────────────────────────────────────────────────────────────
+
+    /** @return array<string,string> keyword → reply */
+    public function filters(int $chatId): array
+    {
+        $f = $this->chat($chatId)['filters'] ?? [];
+        return is_array($f) ? $f : [];
+    }
+
+    public function saveFilter(int $chatId, string $keyword, string $text): void
+    {
+        $c = $this->chat($chatId);
+        $c['filters'][mb_strtolower($keyword)] = $text;
+        $this->data['chat:' . $chatId] = $c;
+        $this->save();
+    }
+
+    public function delFilter(int $chatId, string $keyword): bool
+    {
+        $k = mb_strtolower($keyword);
+        $c = $this->chat($chatId);
+        if (!isset($c['filters'][$k])) {
+            return false;
+        }
+        unset($c['filters'][$k]);
+        $this->data['chat:' . $chatId] = $c;
+        $this->save();
+        return true;
+    }
+
+    public function clearFilters(int $chatId): int
+    {
+        $c = $this->chat($chatId);
+        $n = count($c['filters'] ?? []);
+        unset($c['filters']);
+        $this->data['chat:' . $chatId] = $c;
+        $this->save();
+        return $n;
+    }
+
+    /** First filter whose keyword appears in $text (case-insensitive). */
+    public function matchFilter(int $chatId, string $text): ?string
+    {
+        $low = mb_strtolower($text);
+        foreach ($this->filters($chatId) as $kw => $reply) {
+            if ($kw !== '' && str_contains($low, $kw)) {
+                return $reply;
+            }
+        }
+        return null;
+    }
+
+    // ── playlists (per user) ─────────────────────────────────────────────────
+
+    private function user(int $userId): array
+    {
+        $u = $this->data['user:' . $userId] ?? [];
+        return is_array($u) ? $u : [];
+    }
+
+    /** @return array<string, list<array{title:string,url:string,duration:int,by:string}>> */
+    public function playlists(int $userId): array
+    {
+        $p = $this->user($userId)['playlists'] ?? [];
+        return is_array($p) ? $p : [];
+    }
+
+    public function playlistEntries(int $userId, string $name): array
+    {
+        $e = $this->playlists($userId)[$name] ?? [];
+        return is_array($e) ? $e : [];
+    }
+
+    public function createPlaylist(int $userId, string $name): bool
+    {
+        $u = $this->user($userId);
+        if (isset($u['playlists'][$name])) {
+            return false;
+        }
+        $u['playlists'][$name] = [];
+        $this->data['user:' . $userId] = $u;
+        $this->save();
+        return true;
+    }
+
+    public function deletePlaylist(int $userId, string $name): bool
+    {
+        $u = $this->user($userId);
+        if (!isset($u['playlists'][$name])) {
+            return false;
+        }
+        unset($u['playlists'][$name]);
+        $this->data['user:' . $userId] = $u;
+        $this->save();
+        return true;
+    }
+
+    public function addToPlaylist(int $userId, string $name, array $entry): bool
+    {
+        $u = $this->user($userId);
+        if (!isset($u['playlists'][$name])) {
+            return false;
+        }
+        $u['playlists'][$name][] = $entry;
+        $this->data['user:' . $userId] = $u;
+        $this->save();
+        return true;
+    }
+
+    public function removeFromPlaylist(int $userId, string $name, int $index): bool
+    {
+        $u = $this->user($userId);
+        if (!isset($u['playlists'][$name][$index])) {
+            return false;
+        }
+        array_splice($u['playlists'][$name], $index, 1);
+        $this->data['user:' . $userId] = $u;
+        $this->save();
+        return true;
+    }
+
+    // ── chat feature switches ────────────────────────────────────────────────
+
+    public function welcomeOn(int $chatId): bool
+    {
+        return (bool) ($this->chat($chatId)['welcome'] ?? false);
+    }
+
+    public function setWelcomeOn(int $chatId, bool $v): void
+    {
+        $this->set($chatId, 'welcome', $v);
+    }
+
+    public function cleanMode(int $chatId): bool
+    {
+        return (bool) ($this->chat($chatId)['cleanmode'] ?? false);
+    }
+
+    public function setCleanMode(int $chatId, bool $v): void
+    {
+        $this->set($chatId, 'cleanmode', $v);
+    }
+
+    public function loggerOn(int $chatId): bool
+    {
+        return (bool) ($this->chat($chatId)['logger'] ?? false);
+    }
+
+    public function setLogger(int $chatId, bool $v): void
+    {
+        $this->set($chatId, 'logger', $v);
+    }
+
+    // ── global sudo list ─────────────────────────────────────────────────────
+
+    /** @return list<int> */
+    public function sudoers(): array
+    {
+        $l = $this->data['sudoers'] ?? [];
+        return is_array($l) ? array_values(array_map('intval', $l)) : [];
+    }
+
+    public function isSudo(int $userId): bool
+    {
+        return $userId !== 0 && in_array($userId, $this->sudoers(), true);
+    }
+
+    public function addSudo(int $userId): bool
+    {
+        $l = $this->sudoers();
+        if (in_array($userId, $l, true)) {
+            return false;
+        }
+        $l[] = $userId;
+        $this->data['sudoers'] = $l;
+        $this->save();
+        return true;
+    }
+
+    public function delSudo(int $userId): bool
+    {
+        $l = $this->sudoers();
+        $i = array_search($userId, $l, true);
+        if ($i === false) {
+            return false;
+        }
+        unset($l[$i]);
+        $this->data['sudoers'] = array_values($l);
+        $this->save();
+        return true;
+    }
+
+    // ── global blacklist ─────────────────────────────────────────────────────
+
+    /** @return list<int> */
+    public function blockedChats(): array
+    {
+        $l = $this->data['blocked_chats'] ?? [];
+        return is_array($l) ? array_values(array_map('intval', $l)) : [];
+    }
+
+    public function isBlockedChat(int $chatId): bool
+    {
+        return in_array($chatId, $this->blockedChats(), true);
+    }
+
+    public function addBlockedChat(int $chatId): bool
+    {
+        $l = $this->blockedChats();
+        if (in_array($chatId, $l, true)) {
+            return false;
+        }
+        $l[] = $chatId;
+        $this->data['blocked_chats'] = $l;
+        $this->save();
+        return true;
+    }
+
+    public function delBlockedChat(int $chatId): bool
+    {
+        $l = $this->blockedChats();
+        $i = array_search($chatId, $l, true);
+        if ($i === false) {
+            return false;
+        }
+        unset($l[$i]);
+        $this->data['blocked_chats'] = array_values($l);
+        $this->save();
+        return true;
+    }
+
+    /** @return list<int> */
+    public function blockedUsers(): array
+    {
+        $l = $this->data['blocked_users'] ?? [];
+        return is_array($l) ? array_values(array_map('intval', $l)) : [];
+    }
+
+    public function isBlockedUser(int $userId): bool
+    {
+        return $userId !== 0 && in_array($userId, $this->blockedUsers(), true);
+    }
+
+    public function addBlockedUser(int $userId): bool
+    {
+        $l = $this->blockedUsers();
+        if (in_array($userId, $l, true)) {
+            return false;
+        }
+        $l[] = $userId;
+        $this->data['blocked_users'] = $l;
+        $this->save();
+        return true;
+    }
+
+    public function delBlockedUser(int $userId): bool
+    {
+        $l = $this->blockedUsers();
+        $i = array_search($userId, $l, true);
+        if ($i === false) {
+            return false;
+        }
+        unset($l[$i]);
+        $this->data['blocked_users'] = array_values($l);
+        $this->save();
+        return true;
+    }
+
     /** All chat ids the bot has served (broadcast targets). */
     public function chatIds(): array
     {

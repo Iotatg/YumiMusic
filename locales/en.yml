@@ -1242,3 +1242,21 @@ move_invalid: "{emoji:⚠️} ɪηᴠᴧʟɪᴅ ǫᴜєᴜє ɪηᴅєx.\n\n<blo
 purge_usage: "{emoji:⚠️} ʀєᴘʟʏ ᴛσ ᴧ ᴍєssᴧɢє ᴛσ ᴘυʀɢє ғʀσᴍ ɪᴛ υᴘᴛσ ʜєʀє.\n\n<blockquote>➥ υsє: ʀєᴘʟʏ + <code>/purge</code></blockquote>"
 pin_usage: "{emoji:⚠️} ʀєᴘʟʏ ᴛσ ᴛʜє ᴍєssᴧɢє ʏσᴜ ᴡᴧηᴛ ᴛσ ᴘɪη.\n\n<blockquote>➥ υsє: ʀєᴘʟʏ + <code>/pin</code></blockquote>"
 sudo_owner_only: "{emoji:🛡️} ᴛʜɪs ᴄσᴍᴍᴧηᴅ ɪs ʀєsᴛʀɪᴄᴛєᴅ ᴛσ ᴛʜє ʙσᴛ σᴡηєʀ."
+
+# ── notes / filters / welcome / promote ─────────────────────────────────────
+note_usage: "{emoji:📝} <b>𝐔‌sᴧɢє</b>: <code>{cmd} [name] [text]</code>"
+note_deleted: "🗑️ <b>𝐍‌σᴛє 𝐃‌єʟєᴛєᴅ!</b>\n<blockquote>❖ 𝐍‌ᴧᴍє : <code>{name}</code> ʜᴧs ʙєєη ʀєᴍσᴠєᴅ.</blockquote>"
+notes_title: "📝 <b>𝐍‌σᴛєs</b>\n"
+filter_usage: "{emoji:🔖} <b>𝐔‌sᴧɢє</b>: <code>{cmd} [keyword] [reply]</code>"
+filter_deleted: "🗑️ <b>𝐅‌ɪʟᴛєꝛ 𝐃‌єʟєᴛєᴅ!</b>\n<blockquote>❖ 𝐊‌єʏᴡσꝛᴅ : <code>{keyword}</code> ʜᴧs ʙєєη ʀєᴍσᴠєᴅ.</blockquote>"
+filters_title: "🔖 <b>𝐅‌ɪʟᴛєꝛs</b>\n"
+welcome_enabled: "{emoji:👋} <b>𝐖‌єʟᴄσᴍє 𝐄‌ηᴧʙʟєᴅ!</b>\n<blockquote>❖ ɴєᴡ ᴍєᴍʙєʀs ωɪʟʟ ʙє ɢʀєєᴛєᴅ.</blockquote>"
+welcome_disabled: "{emoji:🔕} <b>𝐖‌єʟᴄσᴍє 𝐃‌ɪsᴧʙʟєᴅ!</b>\n<blockquote>❖ ɴєᴡ ᴍєᴍʙєʀs ωɪʟʟ ησᴛ ʙє ɢʀєєᴛєᴅ.</blockquote>"
+welcome_greeting: |
+  👋 𝐖‌єʟᴄσᴍє {user}!
+
+  <blockquote>❖ 𝐆‌ʟᴧᴅ ᴛσ ʜᴧᴠє ʏσυ ɪη <b>{chat}</b>.
+  ➥ ᴜsє /play [song] ᴛσ sᴛᴧʀᴛ ᴛʜє ᴍυsɪᴄ ♬</blockquote>
+promote_success: "{emoji:⭐} <b>𝐔‌sєꝛ 𝐏‌ʀσᴍσᴛєᴅ!</b>\n<blockquote>❖ 𝐔‌sєꝛ : {user}\n➥ 𝐀‌ᴄᴛɪση : ησω ᴧη ᴧᴅᴍɪη</blockquote>"
+demote_success: "{emoji:⬇️} <b>𝐔‌sєꝛ 𝐃‌єᴍσᴛєᴅ!</b>\n<blockquote>❖ 𝐔‌sєʀ : {user}\n➥ 𝐀‌ᴄᴛɪση : ησ ʟσηɢєʀ ᴧη ᴧᴅᴍɪη</blockquote>"
+promote_basic_unsupported: "{emoji:⚠️} <b>𝐁‌ᴧsɪᴄ 𝐆‌ʀσυᴘ</b>\n\n<blockquote>❖ ᴛєʟєɢʀᴧᴍ ᴅσєs ησᴛ ʟєᴛ ʙσᴛs ᴘʀσᴍσᴛє ɪη ʙᴧsɪᴄ ɢʀσυᴘs.\n➥ υᴘɢʀᴧᴅє ᴛʜɪs ᴄʜᴧᴛ ᴛσ ᴧ sυᴘєʀɢʀσυᴘ ᴛσ υsє /promote.</blockquote>"
