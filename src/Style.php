@@ -105,6 +105,32 @@ final class Util
         return $out . '…';
     }
 
+    /**
+     * Canonical form of a track title, used to recognise the same song across
+     * uploads ("Song (Official Video)" vs "Song | Label"). Bracketed parts and
+     * everything after a pipe are dropped, common upload noise is removed, and
+     * punctuation/case are normalised.
+     */
+    public static function normTitle(string $title): string
+    {
+        if ($title === '') return '';
+        $t = mb_strtolower($title, 'UTF-8');
+        $t = (string) preg_replace('/[\(\[\{][^\)\]\}]*[\)\]\}]/u', ' ', $t);
+        if (($p = mb_strpos($t, '|')) !== false) {
+            $t = mb_substr($t, 0, $p);
+        }
+        $noise = [
+            'official music video', 'official video', 'music video', 'lyric video',
+            'lyrics', 'full video', 'video song', 'audio song', 'audio track',
+            'official audio', 'audio', '4k', '8k', 'hd', 'remix', 'song', 'full track',
+        ];
+        foreach ($noise as $n) {
+            $t = (string) preg_replace('/\b' . preg_quote($n, '/') . '\b/u', ' ', $t);
+        }
+        $t = (string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $t);
+        return trim((string) preg_replace('/\s+/u', ' ', $t));
+    }
+
     public static function escapeHtml(string $s): string
     {
         return str_replace(['&', '<', '>', '"'], ['&amp;', '&lt;', '&gt;', '&quot;'], $s);

@@ -1850,6 +1850,9 @@ final class App
         }
         if (!isset($this->rooms[$chatId])) {
             $this->rooms[$chatId] = new Room($chatId);
+            // Autoplay is a per-chat preference — a fresh room must inherit it,
+            // otherwise the panel toggle silently resets on the next /play.
+            $this->rooms[$chatId]->autoplay = $this->db->autoplay($chatId);
         }
         $r = $this->rooms[$chatId];
         $this->searchCache[$chatId] = $results;
@@ -2133,6 +2136,29 @@ final class App
         $r->playing = false;
         $this->send($chatId, $this->t($chatId, 'stream_downloading_next'));
         $path = $this->resolveTrack($t, $vcVideo);
+        // An autoplay pick that cannot be fetched should not kill the queue —
+        // walk the rest of the pool before giving up.
+        if ($path === null && !empty($t['_pool'])) {
+            $tries = 0;
+            foreach ($t['_pool'] as $alt) {
+                if ($tries >= 3) {
+                    break;
+                }
+                if (!is_array($alt) || ($alt['media_id'] ?? '') === ($t['media_id'] ?? '')) {
+                    continue;
+                }
+                $tries++;
+                $altPath = $this->resolveTrack($alt, $vcVideo);
+                if ($altPath !== null) {
+                    $alt['req'] = $t['req'];
+                    $alt['autoplay'] = true;
+                    $t = $alt;
+                    $r->track = $t;
+                    $path = $altPath;
+                    break;
+                }
+            }
+        }
         if ($path === null) {
             $r->track = null;
             $this->send($chatId, $this->t($chatId, 'play_download_failed'));
@@ -2148,6 +2174,7 @@ final class App
             return;
         }
         $r->playing = true;
+        $r->remember($t);
         $r->statusMsg = $this->nowPlayingCard($chatId, $r, $sender);
         echo "[yumi] card msg id: {$r->statusMsg}\n";
         $this->logPlayback($chatId, $sender, (string) $t['title'], $this->trackUrl($t), false);
@@ -2162,7 +2189,9 @@ final class App
             'title', Util::escapeHtml((string) ($t['title'] ?? '-')),
             'duration', Util::formatTime((int) ($t['duration'] ?? 0)),
             'url', $this->trackUrl($t),
-            'by', $this->botPeers->userMention($sender)
+            'by', !empty($t['autoplay'])
+                ? $this->loc->get($lang, 'autoplay_requester')
+                : $this->botPeers->userMention($sender)
         );
         $thumb = (string) ($t['thumbnail'] ?? '');
         if ($thumb !== '' && $this->db->thumbnailsDisabled($chatId) === false) {
@@ -2255,9 +2284,11 @@ final class App
         }
         $next = array_shift($r->queue);
         if ($next === null && $r->autoplay && $r->track !== null) {
-            $this->send($chatId, $this->t($chatId, 'stream_downloading_next'));
-            $next = $this->autoplayPick($r->track);
+            $pool = $this->autoplayPool($r, $r->track, 5);
+            $next = $this->pickAutoplay($pool);
             if ($next !== null) {
+                $next['autoplay'] = true;
+                $next['_pool'] = $pool;
                 $this->send($chatId, $this->t($chatId, 'stream_autoplay_next', [
                     'title' => Util::escapeHtml($next['title']),
                 ]));
@@ -2271,31 +2302,96 @@ final class App
         $this->startTrack($chatId, $r, $next, 0);
     }
 
-    private function autoplayPick(array $last): ?array
+    /**
+     * Build the autoplay candidate pool: catalogue neighbours first, then
+     * artist/title searches. Anything already heard in this room is dropped,
+     * so a finished song can never come back as its own "next" track.
+     *
+     * @return list<array>
+     */
+    private function autoplayPool(Room $r, array $last, int $limit = 5): array
     {
-        $id = $last['media_id'] ?? '';
-        $body = null;
-        if ($id !== '' && preg_match('#^yt:(.+)$#', $id, $mm)) {
-            $url = rtrim(getenv('IOTA_API_URL') ?: 'http://127.0.0.1:8014', '/')
-                . '/similar/' . rawurlencode('yt:' . $mm[1]) . '?limit=8';
-            $body = @file_get_contents($url);
-        }
-        if ($body !== false && $body !== null) {
-            $json = json_decode($body, true);
-            foreach (($json['results'] ?? []) as $cand) {
-                if (($cand['media_id'] ?? '') !== '') {
-                    return [
-                        'media_id' => $cand['media_id'],
-                        'title' => ($cand['title'] ?? '') . (($cand['artist'] ?? '') !== '' ? ' - ' . $cand['artist'] : ''),
-                        'artist' => $cand['artist'] ?? '',
-                        'duration' => $cand['duration_seconds'] ?? 0,
-                        'thumbnail' => $cand['thumbnail_url'] ?? '',
-                    ];
+        $out = [];
+        $ids = [];
+        $titles = [];
+        $add = function (array $c) use (&$out, &$ids, &$titles, $r, $last, $limit): void {
+            if (count($out) >= $limit) {
+                return;
+            }
+            $id = (string) ($c['media_id'] ?? '');
+            if ($id === '' || $id === (string) ($last['media_id'] ?? '')) {
+                return;
+            }
+            // Previews and hour-long compilations make poor "next" tracks.
+            $dur = (int) ($c['duration'] ?? 0);
+            if ($dur > 0 && ($dur < 45 || $dur > 1200)) {
+                return;
+            }
+            $n = Util::normTitle((string) ($c['title'] ?? ''));
+            foreach ($titles as $seen) {
+                if (Room::sameTitle($n, $seen)) {
+                    return;
                 }
             }
+            if (isset($ids[$id]) || $r->played($c)) {
+                return;
+            }
+            $ids[$id] = true;
+            $titles[] = $n;
+            $out[] = $c;
+        };
+
+        foreach ($this->iota->similar((string) ($last['media_id'] ?? ''), 8) as $c) {
+            $add($c);
         }
-        $res = $this->iota->search(($last['title'] ?? '') . ' similar songs', 3);
-        return $res[0] ?? null;
+        if ($out === []) {
+            foreach ($this->relatedQueries($last, $limit + 4) as $c) {
+                $add($c);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Fallback discovery when the catalogue has no neighbours: the artist's
+     * other tracks, then a "similar songs" text search.
+     *
+     * @return list<array>
+     */
+    private function relatedQueries(array $last, int $limit): array
+    {
+        $artist = trim((string) ($last['artist'] ?? ''));
+        $title = Util::normTitle((string) ($last['title'] ?? ''));
+        $queries = [];
+        if ($artist !== '') {
+            $queries[] = $artist;
+        }
+        if ($title !== '') {
+            $queries[] = $title . ' similar songs';
+        }
+        if ($artist !== '' && $title !== '') {
+            $queries[] = $artist . ' ' . $title;
+        }
+        $out = [];
+        foreach ($queries as $q) {
+            foreach ($this->findTracks($q, $limit) as $c) {
+                $out[] = $c;
+            }
+            if (count($out) >= $limit * 2) {
+                break;
+            }
+        }
+        return $out;
+    }
+
+    /** Random pick from the top of the pool, so autoplay does not follow a fixed order. */
+    private function pickAutoplay(array $pool): ?array
+    {
+        $n = min(count($pool), 4);
+        if ($n === 0) {
+            return null;
+        }
+        return $pool[$n === 1 ? 0 : random_int(0, $n - 1)];
     }
 
     /** 1s room tick: position, end-streak, progress-button refresh. */

@@ -38,6 +38,42 @@ final class Iota
         return $out;
     }
 
+    /**
+     * Related tracks for a seed media id — the primary autoplay source.
+     * Returns an empty list when the catalogue has no neighbours.
+     *
+     * @return list<array{media_id:string,title:string,artist:string,duration:int,thumbnail:string}>
+     */
+    public function similar(string $mediaId, int $limit = 8): array
+    {
+        if ($mediaId === '') {
+            return [];
+        }
+        $url = $this->baseUrl . '/similar/' . rawurlencode($mediaId)
+            . '?limit=' . $limit . '&key=' . rawurlencode($this->apiKey);
+        $body = self::httpGet($url, 15);
+        if ($body === null) {
+            return [];
+        }
+        $json = json_decode($body, true);
+        $out = [];
+        foreach (($json['results'] ?? []) as $r) {
+            $id = (string) ($r['media_id'] ?? '');
+            $title = (string) ($r['title'] ?? '');
+            if ($id === '' || $title === '') {
+                continue;
+            }
+            $out[] = [
+                'media_id' => $id,
+                'title' => $title,
+                'artist' => (string) ($r['artist'] ?? ''),
+                'duration' => (int) ($r['duration_seconds'] ?? 0),
+                'thumbnail' => (string) ($r['thumbnail_url'] ?? ''),
+            ];
+        }
+        return $out;
+    }
+
     public function baseUrl(): string
     {
         return $this->baseUrl;
