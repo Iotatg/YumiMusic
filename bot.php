@@ -59,6 +59,7 @@ require __DIR__ . '/src/RsaKey.php';
 require __DIR__ . '/src/MtProto.php';
 require __DIR__ . '/src/Ntg.php';
 require __DIR__ . '/src/Iota.php';
+require __DIR__ . '/src/RiteshApi.php';
 require __DIR__ . '/src/UrlResolver.php';
 require __DIR__ . '/src/Peers.php';
 require __DIR__ . '/src/Voice.php';
@@ -104,6 +105,9 @@ $app = new App(
     iotaKey: $env('IOTA_API_KEY'),
     assistantSession: $assistantSession,
     vcEnabled: $vcEnabled,
+    riteshUrl: $env('RITESH_API_URL', 'https://api.riteshyt.in'),
+    riteshKey: $env('RITESH_API_KEY', ''),
+    riteshEnabled: $env('RITESH_ENABLED', 'true') === 'true',
 );
 
 set_error_handler(function ($no, $str, $file, $line) {

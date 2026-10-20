@@ -17,6 +17,7 @@ final class App
     public Peers $botPeers;
     public ?Voice $voice = null;
     public Iota $iota;
+    public RiteshApi $ritesh;
     public int $ownerId;
     private string $downloads;
     private Locales $loc;
@@ -47,6 +48,9 @@ final class App
         string $iotaKey,
         ?string $assistantSession,
         private readonly bool $vcEnabled,
+        string $riteshUrl = '',
+        string $riteshKey = '',
+        bool $riteshEnabled = true,
     ) {
         $this->downloads = dirname(__DIR__) . '/data/downloads';
         if (!is_dir($this->downloads)) {
@@ -54,6 +58,7 @@ final class App
         }
         $this->started = time();
         $this->iota = new Iota($iotaUrl, $iotaKey);
+        $this->ritesh = new RiteshApi($riteshUrl, $riteshKey, $riteshEnabled);
         $this->ownerId = (int) (getenv('OWNER_ID') ?: 0);
         $this->botName = (string) (getenv('BOT_NAME') ?: '𝐘‌υϻɪ 𝘅 ϻ‌υsɪᴄ');
 
@@ -250,6 +255,7 @@ final class App
                 ['notes', 'ʟɪsᴛ sᴧᴠєᴅ ησᴛєs'], ['filter', 'ᴧᴅᴅ ᴧη ᴧυᴛσ ʀєᴘʟʏ'],
                 ['filters', 'ʟɪsᴛ ғɪʟᴛєʀs'], ['myplaylists', 'ʏσυʀ ᴘʟᴧʏʟɪsᴛs'],
                 ['createplaylist', 'ηєω ᴘʟᴧʏʟɪsᴛ'], ['addtoplaylist', 'ᴧᴅᴅ ᴧ ᴛʀᴧᴄᴋ'],
+                ['provider', 'sєᴀʀᴄʜ ʙᴧᴄᴋєηᴅ'],
                 ['welcome', 'ᴛσɢɢʟє ωєʟᴄσᴍє'], ['promote', 'ᴘʀσᴍσᴛє ᴧ ᴍєᴍʙєʀ'],
                 ['demote', 'ᴅєᴍσᴛє ᴧ ᴍєᴍʙєʀ'], ['cleanmode', 'ᴧυᴛσ-ᴅєʟєᴛє ᴄᴏᴍᴍᴀɴᴅs'],
                 ['blacklisted', 'ɢʟσʙᴧʟ ʙʟᴧᴄᴋʟɪsᴛ'],
@@ -937,6 +943,10 @@ final class App
             case '/reload':
                 $this->cmdReload($chatId, $sender);
                 return;
+            case '/provider':
+            case '/providers':
+                $this->cmdProvider($chatId, $sender, $arg);
+                return;
             // ── notes ────────────────────────────────────────────────────────
             case '/save':
                 $this->cmdNoteSave($chatId, $arg);
@@ -1235,6 +1245,31 @@ final class App
         // Drop cached peer/admin lookups so the next command re-reads them.
         $this->adminCache = [];
         $this->send($chatId, '🔄 <b>𝐀‌ᴅᴍɪη 𝐂‌ᴧᴄʜє 𝐑‌єʟσᴧᴅєᴅ</b>');
+    }
+
+    private function cmdProvider(int $chatId, int $sender, string $arg): void
+    {
+        if (!$this->canManageSettings($chatId, $sender)) {
+            $this->send($chatId, $this->t($chatId, 'only_admin'));
+            return;
+        }
+        $arg = strtolower(trim($arg));
+        if ($arg !== '' && in_array($arg, ['auto', 'iota', 'ritesh'], true)) {
+            $this->db->setProvider($arg);
+        } elseif ($arg !== '') {
+            $this->send($chatId, '⚠️ <b>𝐔‌sᴧɢє</b>: <code>/provider auto|iota|ritesh</code>');
+            return;
+        }
+
+        $cur = $this->db->provider();
+        $mark = fn(string $p): string => $p === $cur ? '●' : '○';
+        $this->send($chatId, '🔌 <b>𝐃‌σωηʟσᴧᴅ 𝐏‌ʀσᴠɪᴅєʀs</b>'
+            . "\n\n<blockquote>"
+            . $mark('auto') . " <b>ᴀυᴛσ</b> — ɪσᴛᴧ ғɪʀsᴛ, ʀɪᴛєsʜ ғᴧʟʟʙᴧᴄᴋ"
+            . "\n" . $mark('iota') . " <b>ɪσᴛᴧ-ᴧᴘɪ</b> — " . ($this->iota->baseUrl() !== '' ? 'ᴄσηηєᴄᴛєᴅ' : 'ησᴛ sєᴛ')
+            . "\n" . $mark('ritesh') . " <b>ʀɪᴛєsʜ-ᴧᴘɪ</b> — "
+            . ($this->ritesh->enabled() ? 'ᴄσηηєᴄᴛєᴅ' : 'ᴅɪsᴧʙʟєᴅ')
+            . "\n\n➥ ᴄυʀʀєηᴛ: <b>" . strtoupper($cur) . "</b></blockquote>");
     }
 
     private function cmdBug(int $chatId, int $sender, string $arg): void
@@ -1756,6 +1791,37 @@ final class App
 
     // ── play pipeline ────────────────────────────────────────────────────────
 
+    /**
+     * Search across the configured providers. iota runs first, RiteshApi is the
+     * fallback (or the primary when /provider ritesh is set).
+     *
+     * @return list<array>
+     */
+    private function findTracks(string $query, int $limit = 5): array
+    {
+        $provider = $this->db->provider();
+        $isUrl = UrlResolver::isUrl($query);
+        $useIota = $provider !== 'ritesh';
+        $useRitesh = $provider !== 'iota' && $this->ritesh->enabled();
+
+        $out = [];
+        if ($useIota) {
+            $out = $isUrl ? UrlResolver::resolve($query, $this->iota) : $this->iota->search($query, $limit);
+        }
+        if ($out === [] && $useRitesh) {
+            $hit = $isUrl ? $this->ritesh->resolveUrl($query) : null;
+            if ($hit !== null) {
+                $out = [$hit];
+            } else {
+                $out = $this->ritesh->search($query, $limit);
+            }
+            if ($out !== []) {
+                echo "[yumi] ritesh supplied " . count($out) . " result(s)\n";
+            }
+        }
+        return array_values($out);
+    }
+
     private function cmdPlay(int $chatId, int $sender, string $arg, bool $vcVideo, int $replyTo = 0, int $replied = 0): void
     {
         if ($arg === '') {
@@ -1777,11 +1843,7 @@ final class App
         // Pasted links (Spotify / Apple Music / Deezer / YouTube / direct file)
         // must be resolved to a real track first — iota would treat the URL
         // itself as a text query and return nothing.
-        if (UrlResolver::isUrl($arg)) {
-            $results = UrlResolver::resolve($arg, $this->iota);
-        } else {
-            $results = $this->iota->search($arg, 5);
-        }
+        $results = $this->findTracks($arg, 5);
         if ($results === []) {
             $this->send($chatId, $this->t($chatId, 'no_song_found'));
             return;
@@ -1838,7 +1900,7 @@ final class App
             return;
         }
         $this->send($chatId, $this->t($chatId, 'searching_query', ['query' => Util::escapeHtml($arg)]));
-        $results = $this->iota->search($arg, 3);
+        $results = $this->findTracks($arg, 3);
         $pick = null;
         foreach ($results as $cand) {
             if ((int) $cand['duration'] > 0 && (int) $cand['duration'] <= 600) {
@@ -2140,7 +2202,25 @@ final class App
         if (is_file($dest) && filesize($dest) > 1024) {
             return $dest;
         }
-        return $this->iota->downloadToFile($t['media_id'], $dest, $video) ? $dest : null;
+        $provider = $this->db->provider();
+        if ($provider !== 'ritesh' && $this->iota->downloadToFile($t['media_id'], $dest, $video)) {
+            return $dest;
+        }
+        // Ritesh fallback: yt:<id> → bare id, url:<u> → the url itself.
+        if ($provider !== 'iota' && $this->ritesh->enabled()) {
+            $q = $mediaId;
+            if (str_starts_with($q, 'yt:')) {
+                $q = substr($q, 3);
+            }
+            if ($this->ritesh->downloadToFile($q, $dest, $video)) {
+                return $dest;
+            }
+        }
+        // Forced provider failed — still try the other one rather than give up.
+        if ($provider === 'ritesh' && $this->iota->downloadToFile($t['media_id'], $dest, $video)) {
+            return $dest;
+        }
+        return null;
     }
 
     // ── room engine ──────────────────────────────────────────────────────────

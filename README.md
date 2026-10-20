@@ -133,6 +133,9 @@
   | `STRING_SESSIONS` | **Yes** | — | Assistant user session string (Pyrogram hex or MadelineProto base64url) |
   | `IOTA_API_URL` | No | `http://127.0.0.1:8014` | Self-hosted [Iota-api](https://github.com/Iotatg/Iota-api) endpoint |
   | `IOTA_API_KEY` | No | — | Iota API key (`iota_…`, created via the admin API) |
+  | `RITESH_ENABLED` | No | `true` | Enable [RiteshApi](https://api.riteshyt.in) as a second provider |
+  | `RITESH_API_URL` | No | `https://api.riteshyt.in` | RiteshApi base URL |
+  | `RITESH_API_KEY` | No | — | RiteshApi key (`ritesh…`) |
   | `BOT_NAME` | No | `Yumi Music` | Display name used in cards |
   | `BOT_USERNAME` | No | `Yumi_MusicBot` | Bot username used in `@mention` deep links |
   | `VC_ENABLED` | No | `on` | Master switch for voice-chat streaming |
@@ -178,6 +181,7 @@
   | `/lang` | Opens the interactive language selector panel |
   | `/settings` | Opens the interactive visual settings control panel |
   | `/playmode <admin/everyone>` | Who is allowed to trigger playback |
+  | `/provider [auto/iota/ritesh]` | Shows or switches the search & download backend |
   | `/adminmode <on/off>` | Restricts commands to chat admins |
   | `/nothumb <on/off>` | Toggles artwork on now-playing cards |
   | `/autoleave <on/off>` | Leaves the voice chat when the queue empties |

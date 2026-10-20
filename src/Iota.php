@@ -38,6 +38,11 @@ final class Iota
         return $out;
     }
 
+    public function baseUrl(): string
+    {
+        return $this->baseUrl;
+    }
+
     public function downloadUrl(string $mediaId, bool $video = false): string
     {
         return $this->baseUrl . '/download/' . rawurlencode($mediaId)

@@ -407,6 +407,21 @@ final class Db
         $this->set($chatId, 'logger', $v);
     }
 
+    // ── global provider preference ───────────────────────────────────────────
+
+    /** "auto" | "iota" | "ritesh" — which search/download backend runs first. */
+    public function provider(): string
+    {
+        $p = (string) ($this->data['provider'] ?? 'auto');
+        return in_array($p, ['auto', 'iota', 'ritesh'], true) ? $p : 'auto';
+    }
+
+    public function setProvider(string $p): void
+    {
+        $this->data['provider'] = in_array($p, ['auto', 'iota', 'ritesh'], true) ? $p : 'auto';
+        $this->save();
+    }
+
     // ── global sudo list ─────────────────────────────────────────────────────
 
     /** @return list<int> */
