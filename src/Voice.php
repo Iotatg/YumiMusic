@@ -82,7 +82,19 @@ final class Voice
             if (!$video) {
                 $req->put('video_stopped', true);
             }
-            $updates = $this->mt->invoke($req, 45);
+            try {
+                $updates = $this->mt->invoke($req, 45);
+            } catch (Throwable $flood) {
+                // FLOOD_WAIT_X on join is common after rapid rejoins — wait and retry once
+                if (preg_match('/FLOOD_WAIT_(\d+)/', $flood->getMessage(), $m)) {
+                    $wait = min((int) $m[1] + 1, 30);
+                    echo "[{$this->tag}] joinGroupCall FLOOD_WAIT {$wait}s — retrying\n";
+                    sleep($wait);
+                    $updates = $this->mt->invoke($req, 45);
+                } else {
+                    throw $flood;
+                }
+            }
             $this->groupCalls[$chatId] = $call;
             return $this->findAnswer($updates);
         } catch (Throwable $e) {

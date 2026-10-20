@@ -116,4 +116,26 @@ final class Peers
     {
         return new TlNode('inputPeerSelf');
     }
+
+    /** Best-effort display name for a user id (fallback "User"). */
+    public function userName(int $userId): string
+    {
+        $u = $this->cache["user:$userId"] ?? null;
+        if ($u === null) {
+            return 'User';
+        }
+        foreach (['first_name', 'title', 'last_name'] as $k) {
+            $v = $u->str($k);
+            if ($v !== '' && $v !== null) {
+                return $v;
+            }
+        }
+        return 'User';
+    }
+
+    /** HTML mention with cached name (fallback styled "User"). */
+    public function userMention(int $userId): string
+    {
+        return Util::htmlMention($this->userName($userId), $userId);
+    }
 }
