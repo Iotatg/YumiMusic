@@ -154,6 +154,7 @@ final class App
         try {
             $names = [
                 ['play', 'Play a song'], ['video', 'Send a video'],
+                ['vplay', 'Stream video in VC'],
                 ['skip', 'Skip current track'], ['pause', 'Pause'],
                 ['resume', 'Resume'], ['stop', 'Stop and clear'],
                 ['queue', 'Show queue'], ['seek', 'Seek seconds'],
@@ -379,6 +380,11 @@ final class App
             case '/video':
                 $this->cmdPlay($chatId, $sender, $arg, true);
                 return;
+            case '/vplay':
+                // Nandani parity: stream the video into the voice chat
+                if (!$this->guardVc($chatId)) return;
+                $this->cmdVcVideo($chatId, $sender, $arg);
+                return;
             case '/skip':
                 if (!$this->guardVc($chatId)) return;
                 $this->advanceRoom($chatId);
@@ -408,6 +414,7 @@ final class App
                     "\u{25B6}\u{FE0F} <b>𝐌‌υsɪᴄ 𝐑‌єsᴜᴍєᴅ!</b>\n\n<blockquote>❖ 𝐏‌ʟᴧʏʙᴧᴄᴋ ɪs ʙᴧᴄᴋ σɴ ᴛʀᴧᴄᴋ \u{266C}</blockquote>"
                 ));
                 return;
+            case '/end':
             case '/stop':
                 if (!$this->guardVc($chatId)) return;
                 $this->dropRoom($chatId);
@@ -547,7 +554,36 @@ final class App
         }
     }
 
-    private function startTrack(int $chatId, Room $r, array $t, int $sender): void
+    private function cmdVcVideo(int $chatId, int $sender, string $arg): void
+    {
+        if ($arg === '') {
+            $this->send($chatId, YumiStyle::header(
+                "\u{2753} <b>𝐔‌sᴧɢє!</b>\n\n<blockquote>❖ /vplay [video name]\n➥ 𝐄‌xᴧᴍᴘʟє : /vplay believer</blockquote>"
+            ));
+            return;
+        }
+        $results = $this->iota->search($arg, 5);
+        if ($results === []) {
+            $this->send($chatId, YumiStyle::header(
+                "\u{274C} <b>𝐍‌σ 𝐑‌єsυʟᴛs!</b>\n\n<blockquote>❖ 𝐓‌ꝛʏ ᴧησᴛʜєꝛ ǫᴜᴇʀʏ</blockquote>"
+            ));
+            return;
+        }
+        if (!isset($this->rooms[$chatId])) {
+            $this->rooms[$chatId] = new Room($chatId);
+        }
+        $r = $this->rooms[$chatId];
+        if ($r->track === null && $r->queue === []) {
+            $this->startTrack($chatId, $r, $results[0], $sender, true);
+        } else {
+            $t = $results[0];
+            $t['video'] = true;
+            $r->queue[] = $t;
+            $this->send($chatId, YumiStyle::queued($t, count($r->queue), '𝐔‌sєꝛ'), 0, $this->playMarkup($r));
+        }
+    }
+
+    private function startTrack(int $chatId, Room $r, array $t, int $sender, bool $vcVideo = false): void
     {
         $r->track = $t;
         $r->position = 0;
@@ -555,7 +591,7 @@ final class App
         $this->send($chatId, YumiStyle::header(
             "\u{2B07} <b>𝐃‌σωηʟσᴧᴅɪηɢ!</b>\n\n<blockquote>❖ " . Util::escape($t['title']) . "</blockquote>"
         ));
-        $path = $this->resolveTrack($t, false);
+        $path = $this->resolveTrack($t, $vcVideo);
         if ($path === null) {
             $r->track = null;
             $this->send($chatId, YumiStyle::header(
@@ -564,7 +600,7 @@ final class App
             return;
         }
         $r->path = $path;
-        $err = $this->voice?->playFile($chatId, $path, false);
+        $err = $this->voice?->playFile($chatId, $path, $vcVideo);
         if ($err !== '') {
             $r->track = null;
             echo "[yumi] playFile failed: $err\n";
@@ -624,7 +660,7 @@ final class App
             return;
         }
         if ($r->loop && $r->path !== '') {
-            $err = $this->voice?->playFile($chatId, $r->path, false);
+            $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
             if ($err === '') {
                 $r->position = 0;
                 return;
