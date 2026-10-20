@@ -156,6 +156,12 @@ final class Voice
     public function playFile(int $chatId, string $path, bool $video = false, int $pos = 0): string
     {
         try {
+            // A stale ntg connection (previous track/replay) makes create() fail
+            // with -202 "Connection cannot be initialized more than once".
+            try {
+                $this->ntg->stop($chatId);
+            } catch (Throwable $ignored) {
+            }
             $cam = ($video && $this->videoEnabled) ? ['width' => 1280, 'height' => 720, 'fps' => 30] : null;
             $audio = self::ffmpegAudioCmd($path, $pos);
             // Sources BEFORE create make the SDP offer carry the video m-line —

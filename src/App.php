@@ -576,6 +576,7 @@ final class App
                     $this->send($chatId, $this->t($chatId, 'seek_no_active'));
                     return;
                 }
+                $this->voice?->ntg->stop($chatId);
                 $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
                 if ($err !== '') {
                     $this->send($chatId, $this->t($chatId, 'play_failed', ['error' => Util::escapeHtml($err)]));
@@ -1002,6 +1003,7 @@ final class App
             return;
         }
         if ($r->loop && $r->path !== '') {
+            $this->voice?->ntg->stop($chatId);
             $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
             if ($err === '') {
                 $r->position = 0;
@@ -1207,6 +1209,7 @@ final class App
                 break;
             case 'replay':
                 if ($r->path !== '') {
+                    $this->voice?->ntg->stop($chatId);
                     $err = $this->voice?->playFile($chatId, $r->path, (bool) ($r->track['video'] ?? false));
                     if ($err === '') {
                         $r->position = 0;
