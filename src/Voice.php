@@ -1,0 +1,272 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Voice engine per assistant: ntgcalls instance + VC join/leave/play.
+ * Mirrors the proven flow: stream sources configured BEFORE ntg_create so the
+ * SDP offer carries the video m-line (Telegram discards video frames from
+ * audio-only offers), then phone.joinGroupCall(offer) → ntg_connect(answer).
+ */
+final class Voice
+{
+    public Ntg $ntg;
+    public readonly MtProto $mt;
+    private Peers $peers;
+    /** @var array<int, TlNode> chatId → inputGroupCall */
+    private array $groupCalls = [];
+    /** @var array<int, array{cmd:string, w:int, h:int, fps:int, start:float, next:float, proc:resource}> */
+    private array $cameras = [];
+
+    public function __construct(
+        MtProto $mt,
+        private string $tag = 'yumi-voice',
+        private bool $videoEnabled = false,
+    ) {
+        $this->mt = $mt;
+        $this->ntg = new Ntg();
+        $this->peers = new Peers($mt, $tag);
+    }
+
+    public function peers(): Peers
+    {
+        return $this->peers;
+    }
+
+    // ── group call resolution ────────────────────────────────────────────────
+
+    private function groupCall(int $chatId): ?TlNode
+    {
+        try {
+            if ($chatId <= -1000000000000) {
+                $cid = (int) substr((string) $chatId, 4);
+                $res = $this->mt->invoke((new TlNode('channels.getFullChannel'))
+                    ->put('channel', $this->peers->inputPeer($chatId)), 25);
+                $call = $res->node('full_chat')->node('call');
+            } else {
+                $res = $this->mt->invoke((new TlNode('messages.getFullChat'))
+                    ->put('chat_id', -$chatId), 25);
+                $call = $res->node('full_chat')->node('call');
+            }
+            if ($call === null || $call->name !== 'inputGroupCall') {
+                echo "[{$this->tag}] no active call in $chatId\n";
+                return null;
+            }
+            $this->groupCalls[$chatId] = $call;
+            return $call;
+        } catch (Throwable $e) {
+            echo "[{$this->tag}] groupCall $chatId: " . $e->getMessage() . "\n";
+            // peer cache may be stale
+            $this->peers->refresh();
+            return null;
+        }
+    }
+
+    /** @return string SDP answer ("" on failure) */
+    public function joinGroupCall(int $chatId, string $offer, bool $video): string
+    {
+        try {
+            $call = $this->groupCall($chatId);
+            if ($call === null) {
+                return '';
+            }
+            echo "[{$this->tag}] joining call $chatId (video=$video, offer=" . strlen($offer) . "B)\n";
+            $req = (new TlNode('phone.joinGroupCall'))
+                ->put('call', (new TlNode('inputGroupCall'))
+                    ->put('id', $call->l('id'))
+                    ->put('access_hash', $call->l('access_hash')))
+                ->put('join_as', $this->peers->inputPeerSelf())
+                ->put('params', (new TlNode('dataJSON'))->put('data', $offer));
+            // TL flags are presence-encoded: video_stopped must ONLY appear
+            // when video is OFF — putting it at all sets the flag bit.
+            if (!$video) {
+                $req->put('video_stopped', true);
+            }
+            $updates = $this->mt->invoke($req, 45);
+            $this->groupCalls[$chatId] = $call;
+            return $this->findAnswer($updates);
+        } catch (Throwable $e) {
+            echo "[{$this->tag}] joinGroupCall: " . $e->getMessage() . "\n";
+            unset($this->groupCalls[$chatId]);
+            return '';
+        }
+    }
+
+    private static function findAnswer(?TlNode $updates): string
+    {
+        if ($updates === null) {
+            return '';
+        }
+        $stack = [$updates];
+        while ($stack !== []) {
+            $n = array_pop($stack);
+            if (!$n instanceof TlNode) {
+                continue;
+            }
+            if ($n->name === 'updateGroupCallConnection') {
+                return $n->node('params')->str('data');
+            }
+            foreach (['updates', 'chats', 'users'] as $key) {
+                foreach ($n->list($key) as $o) {
+                    if ($o instanceof TlNode) {
+                        $stack[] = $o;
+                    }
+                }
+            }
+        }
+        return '';
+    }
+
+    public function leaveGroupCall(int $chatId): void
+    {
+        try {
+            $call = $this->groupCalls[$chatId] ?? $this->groupCall($chatId);
+            if ($call === null) {
+                return;
+            }
+            $this->mt->invoke((new TlNode('phone.leaveGroupCall'))
+                ->put('call', (new TlNode('inputGroupCall'))
+                    ->put('id', $call->l('id'))
+                    ->put('access_hash', $call->l('access_hash'))), 30);
+        } catch (Throwable $e) {
+            echo "[{$this->tag}] leaveGroupCall: " . $e->getMessage() . "\n";
+        } finally {
+            unset($this->groupCalls[$chatId]);
+        }
+    }
+
+    // ── playback ─────────────────────────────────────────────────────────────
+
+    /**
+     * Join (if needed) and start streaming a local file.
+     * @return string error ("" on success)
+     */
+    public function playFile(int $chatId, string $path, bool $video = false, int $pos = 0): string
+    {
+        try {
+            $cam = ($video && $this->videoEnabled) ? ['width' => 1280, 'height' => 720, 'fps' => 30] : null;
+            $audio = self::ffmpegAudioCmd($path, $pos);
+            // Sources BEFORE create make the SDP offer carry the video m-line —
+            // but ntgcalls 3.x rejects them until the connection exists, so the
+            // pre-set is best-effort and re-applied after create (like Nandani).
+            $pre = true;
+            try {
+                $this->ntg->setStreamSources($chatId, $audio, $cam);
+            } catch (Throwable $ignored) {
+                $pre = false;
+            }
+            $offer = $this->ntg->create($chatId);
+            if (!$pre) {
+                $this->ntg->setStreamSources($chatId, $audio, $cam);
+            }
+            $answer = $this->joinGroupCall($chatId, $offer, $cam !== null);
+            if ($answer === '') {
+                return 'no group call answer';
+            }
+            $this->ntg->connect($chatId, $answer);
+            if ($cam !== null) {
+                $this->startCamera($chatId, $path);
+            }
+            return '';
+        } catch (Throwable $e) {
+            return $e->getMessage();
+        }
+    }
+
+    /** ntgcalls resolves the binary through wordexp/PATH — a bare name works,
+     *  a full path fails in this build (vfork_launcher ENOENT). */
+    private static function ffmpegBin(): string
+    {
+        return getenv('FFMPEG_BIN') ?: 'ffmpeg';
+    }
+
+    /** Shell pipeline: ffmpeg decodes the file to raw PCM on stdout (SOURCE_SHELL). */
+    private static function ffmpegAudioCmd(string $path, int $pos): string
+    {
+        $b = self::ffmpegBin() . ' ';
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            $b .= '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 ';
+        }
+        if ($pos > 0) {
+            $b .= "-ss $pos ";
+        }
+        $b .= "-v warning -i \"$path\" -f s16le -ac 2 -ar 96000 pipe:1";
+        return $b;
+    }
+
+    /** External camera pusher: ffmpeg rawvideo → ntg_send_external_frame at fps. */
+    private function startCamera(int $chatId, string $path): void
+    {
+        $w = 1280;
+        $h = 720;
+        $fps = 30;
+        $cmd = sprintf(
+            'ffmpeg -i %s -f rawvideo -pix_fmt yuv420p -s %dx%d -r %d pipe:1 2>/dev/null',
+            escapeshellarg($path), $w, $h, $fps
+        );
+        $proc = popen($cmd, 'rb');
+        if (!is_resource($proc)) {
+            return;
+        }
+        stream_set_blocking($proc, false);
+        $this->cameras[$chatId] = [
+            'cmd' => $cmd, 'w' => $w, 'h' => $h, 'fps' => $fps,
+            'start' => microtime(true), 'next' => microtime(true), 'proc' => $proc,
+        ];
+        echo "[{$this->tag}] camera pusher started chat=$chatId {$w}x{$h}@{$fps}\n";
+    }
+
+    public function stopCamera(int $chatId): void
+    {
+        if (isset($this->cameras[$chatId])) {
+            @pclose($this->cameras[$chatId]['proc']);
+            unset($this->cameras[$chatId]);
+        }
+    }
+
+    /** One pusher tick — called from the main loop at high frequency. */
+    public function cameraTick(): void
+    {
+        foreach ($this->cameras as $chatId => $cam) {
+            $now = microtime(true);
+            if ($now < $cam['next']) {
+                continue;
+            }
+            $frameSize = (int) ($cam['w'] * $cam['h'] * 1.5);
+            $frame = '';
+            while (strlen($frame) < $frameSize) {
+                $chunk = @fread($cam['proc'], $frameSize - strlen($frame));
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+                $frame .= $chunk;
+            }
+            if (strlen($frame) < $frameSize) {
+                echo "[{$this->tag}] camera stream ended chat=$chatId\n";
+                $this->stopCamera($chatId);
+                continue;
+            }
+            $ts = (int) (($now - $cam['start']) * 1000);
+            $this->ntg->sendExternalFrame($chatId, $frame, $ts, $cam['w'], $cam['h']);
+            $cam['next'] = $now + 1.0 / $cam['fps'];
+            $this->cameras[$chatId] = $cam;
+        }
+    }
+
+    public function hasCamera(int $chatId): bool
+    {
+        return isset($this->cameras[$chatId]);
+    }
+
+    public function stop(int $chatId): void
+    {
+        $this->stopCamera($chatId);
+        $this->ntg->stop($chatId);
+    }
+
+    public function leave(int $chatId): void
+    {
+        $this->stop($chatId);
+        $this->leaveGroupCall($chatId);
+    }
+}
