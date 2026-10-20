@@ -15,6 +15,8 @@ final class Voice
     private Peers $peers;
     /** @var array<int, TlNode> chatId → inputGroupCall */
     private array $groupCalls = [];
+    /** @var array<int, bool> chats whose voice chat this assistant opened */
+    private array $createdCalls = [];
     /** @var array<int, array{cmd:string, w:int, h:int, fps:int, start:float, next:float, proc:resource}> */
     private array $cameras = [];
 
@@ -79,11 +81,45 @@ final class Voice
         return null;
     }
 
+    /**
+     * Resolve the chat's group call, opening one when the voice chat is empty.
+     * Telegram returns no `call` in getFullChannel until somebody starts the
+     * VC, so a plain lookup made /play fail with "no group call answer" in
+     * every chat where the bot was expected to start the call itself.
+     */
+    private function ensureCall(int $chatId): ?TlNode
+    {
+        $call = $this->groupCall($chatId);
+        if ($call !== null) {
+            return $call;
+        }
+        try {
+            echo "[{$this->tag}] opening voice chat in $chatId\n";
+            $this->mt->invoke((new TlNode('phone.createGroupCall'))
+                ->put('peer', $this->peers->inputPeer($chatId))
+                ->put('random_id', random_int(1, PHP_INT_MAX)), 30);
+            $this->createdCalls[$chatId] = true;
+        } catch (Throwable $e) {
+            echo "[{$this->tag}] createGroupCall $chatId: " . $e->getMessage() . "\n";
+            return null;
+        }
+        // The new call is visible to getFullChannel a moment later.
+        for ($i = 0; $i < 4; $i++) {
+            usleep(400000);
+            $call = $this->groupCall($chatId);
+            if ($call !== null) {
+                return $call;
+            }
+        }
+        echo "[{$this->tag}] voice chat created but not resolvable in $chatId\n";
+        return null;
+    }
+
     /** @return string SDP answer ("" on failure) */
     public function joinGroupCall(int $chatId, string $offer, bool $video): string
     {
         try {
-            $call = $this->groupCall($chatId);
+            $call = $this->ensureCall($chatId);
             if ($call === null) {
                 return '';
             }
@@ -318,6 +354,21 @@ final class Voice
     public function leave(int $chatId): void
     {
         $this->stop($chatId);
+        $call = $this->groupCalls[$chatId] ?? null;
+        $created = $this->createdCalls[$chatId] ?? false;
         $this->leaveGroupCall($chatId);
+        if ($created && $call !== null) {
+            // The assistant opened this voice chat, so /end should close it
+            // instead of leaving an empty call behind.
+            try {
+                $this->mt->invoke((new TlNode('phone.discardGroupCall'))
+                    ->put('call', (new TlNode('inputGroupCall'))
+                        ->put('id', $call->l('id'))
+                        ->put('access_hash', $call->l('access_hash'))), 30);
+            } catch (Throwable $e) {
+                echo "[{$this->tag}] discardGroupCall: " . $e->getMessage() . "\n";
+            }
+        }
+        unset($this->createdCalls[$chatId]);
     }
 }
