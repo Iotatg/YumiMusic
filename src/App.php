@@ -1830,18 +1830,22 @@ final class App
         $useRitesh = $provider !== 'iota' && $this->ritesh->enabled();
 
         $out = [];
-        if ($useIota) {
-            $out = $isUrl
-                ? UrlResolver::resolve($query, $this->iota, $this->ritesh)
-                : $this->searchCached($query, $limit, $provider);
+        if ($isUrl) {
+            // Links are always resolved by the widest catalogue first — the
+            // /provider switch only chooses who answers text searches.
+            $out = UrlResolver::resolve($query, $this->iota, $this->ritesh);
+            if ($out === [] && $this->ritesh->enabled()) {
+                $hit = $this->ritesh->resolveUrl($query);
+                if ($hit !== null) {
+                    $out = [$hit];
+                    echo "[yumi] ritesh supplied 1 result(s)\n";
+                }
+            }
+        } elseif ($useIota) {
+            $out = $this->searchCached($query, $limit, $provider);
         }
         if ($out === [] && $useRitesh) {
-            $hit = $isUrl ? $this->ritesh->resolveUrl($query) : null;
-            if ($hit !== null) {
-                $out = [$hit];
-            } else {
-                $out = $this->ritesh->search($query, $limit);
-            }
+            $out = $this->ritesh->search($query, $limit);
             if ($out !== []) {
                 echo "[yumi] ritesh supplied " . count($out) . " result(s)\n";
             }
