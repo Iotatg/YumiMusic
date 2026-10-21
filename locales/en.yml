@@ -606,6 +606,11 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} ᴅσᴡηʟσᴧᴅ ғᴧɪʟєᴅ. ᴘʟєᴧsє ᴛʀʏ ᴧɢᴧɪη."
 
+assistant_unavailable: |
+  <blockquote><b>⚠️ 𝐀‌ssɪsᴛᴧηᴛ 𝐎‌ғғʟɪηє</b></blockquote>
+
+  <blockquote>The assistant account that streams into the voice chat is no longer active. Add a fresh session string and restart the bot.</blockquote>
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 

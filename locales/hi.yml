@@ -434,6 +434,11 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} डाउनलोड विफल। कृपया पुनः प्रयास करें।"
 
+assistant_unavailable: |
+  <blockquote><b>⚠️ 𝐀‌ssɪsᴛᴧηᴛ 𝐎‌ғғʟɪηє</b></blockquote>
+
+  <blockquote>वॉइस चैट में स्ट्रीम करने वाला असिस्टेंट अकाउंट अब सक्रिय नहीं है। नया सेशन स्ट्रिंग जोड़कर बॉट रीस्टार्ट करें।</blockquote>
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 

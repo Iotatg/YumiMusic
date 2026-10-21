@@ -434,6 +434,11 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} فشل التنزيل. حاول مرة أخرى."
 
+assistant_unavailable: |
+  <blockquote><b>⚠️ 𝐀‌ssɪsᴛᴧηᴛ 𝐎‌ғғʟɪηє</b></blockquote>
+
+  <blockquote>حساب المساعد الذي يبث في الدردشة الصوتية لم يعد نشطًا. أضف سلسلة جلسة جديدة وأعد تشغيل البوت.</blockquote>
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 

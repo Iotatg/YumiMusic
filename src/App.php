@@ -25,6 +25,8 @@ final class App
     private string $botName;
     private string $ntgVer = '3.0.4';
     private string $assistantUser = '';
+    /** False when the assistant session is gone (deleted account / revoked). */
+    private bool $assistantOk = true;
     private int $botId = 0;
     private bool $maint = false;
 
@@ -221,6 +223,7 @@ final class App
                 ->put('id', new TlNode('inputUserSelf')), 20);
             foreach ($me->list('users') as $u) {
                 if ($u instanceof TlNode && $u->name === 'user') {
+                    $this->assistantOk = true;
                     echo "[yumi-assistant] resumed as {$u->str('first_name')} @{$u->str('username')} ({$u->l('id')})\n";
                     if ($u->str('username') !== '') {
                         $this->assistantUser = $u->str('username');
@@ -229,6 +232,7 @@ final class App
             }
             $this->voice->peers()->refresh();
         } catch (Throwable $e) {
+            $this->assistantOk = false;
             echo "[yumi-assistant] whoami failed: " . $e->getMessage() . "\n";
         }
     }
@@ -2218,6 +2222,12 @@ final class App
 
     private function startTrack(int $chatId, Room $r, array $t, int $sender, bool $vcVideo = false): void
     {
+        // No assistant session → no one can join the call, so fail with a
+        // precise reason instead of a misleading "restart the voice chat".
+        if (!$this->assistantOk) {
+            $this->send($chatId, $this->t($chatId, 'assistant_unavailable'));
+            return;
+        }
         $t['req'] = $t['req'] ?? $sender;
         $r->track = $t;
         $r->position = 0;

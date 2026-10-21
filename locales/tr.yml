@@ -433,6 +433,11 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} İndirme başarısız. Lütfen tekrar deneyin."
 
+assistant_unavailable: |
+  <blockquote><b>⚠️ 𝐀‌ssɪsᴛᴧηᴛ 𝐎‌ғғʟɪηє</b></blockquote>
+
+  <blockquote>Sesli sohbete yayın yapan asistan hesabı artık etkin değil. Yeni bir oturum dizesi ekleyip botu yeniden başlatın.</blockquote>
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 
