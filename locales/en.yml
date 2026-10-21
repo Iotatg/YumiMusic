@@ -606,6 +606,12 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} ᴅσᴡηʟσᴧᴅ ғᴧɪʟєᴅ. ᴘʟєᴧsє ᴛʀʏ ᴧɢᴧɪη."
 
+play_added_to_queue_album: |
+  <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
+
+  <blockquote>▫ 𝐒‌ᴛᴧʀᴛєᴅ : {title}
+  ▫ 𝐀‌ᴅᴅєᴅ : {count} 𝐌‌σʀє 𝐓‌ʀᴧᴄᴋs</blockquote>
+
 play_added_to_queue_single: |
   <blockquote><b>✨ 𝐍‌єxᴛ 𝐔‌ᴘ 𝐈‌η 𝐐‌υєυє — #{index} ♬ |</b></blockquote>
 

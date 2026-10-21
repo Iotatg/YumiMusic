@@ -433,6 +433,12 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} İndirme başarısız. Lütfen tekrar deneyin."
 
+play_added_to_queue_album: |
+  <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
+
+  <blockquote>▫ 𝐒‌ᴛᴧʀᴛєᴅ : {title}
+  ▫ 𝐀‌ᴅᴅєᴅ : {count} 𝐌‌σʀє 𝐓‌ʀᴧᴄᴋs</blockquote>
+
 play_added_to_queue_single: |
   <b>{emoji:🎵} Sıraya Eklendi:</b> #{index}
 

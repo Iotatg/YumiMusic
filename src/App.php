@@ -33,6 +33,8 @@ final class App
 
     /** @var array<int, array<int, array>> chatId → last search results */
     private array $searchCache = [];
+    /** @var array<string, array>|null persisted query → tracks (auto-cache) */
+    private ?array $qcache = null;
     /** @var array<string, bool> chatId:userId → admin flag (cleared by /reload) */
     private array $adminCache = [];
     private int $lastPing = 0;
@@ -56,6 +58,10 @@ final class App
         if (!is_dir($this->downloads)) {
             mkdir($this->downloads, 0777, true);
         }
+        // Link-resolution cache lives next to the downloads so a restart keeps
+        // both the parsed links and the audio files.
+        UrlResolver::boot(dirname(__DIR__) . '/data/urlcache.json');
+        $this->pruneDownloads();
         $this->started = time();
         $this->iota = new Iota($iotaUrl, $iotaKey);
         $this->ritesh = new RiteshApi($riteshUrl, $riteshKey, $riteshEnabled);
@@ -1800,13 +1806,30 @@ final class App
     private function findTracks(string $query, int $limit = 5): array
     {
         $provider = $this->db->provider();
+        // A prefixed media id (`yt:`, `am:`, `dz:`, …) is already an exact
+        // catalogue pointer — no search needed.
+        $q = trim($query);
+        if (preg_match('~^(yt|sp|dz|am|jv|sc|bp|rs|mb):\S+$~i', $q)) {
+            $meta = $this->iota->info($q);
+            if ($meta !== null) {
+                return [$meta];
+            }
+            if (str_starts_with($q, 'yt:') && $this->ritesh->enabled()) {
+                $hit = $this->ritesh->details(substr($q, 3));
+                if ($hit !== null) {
+                    return [$hit];
+                }
+            }
+        }
         $isUrl = UrlResolver::isUrl($query);
         $useIota = $provider !== 'ritesh';
         $useRitesh = $provider !== 'iota' && $this->ritesh->enabled();
 
         $out = [];
         if ($useIota) {
-            $out = $isUrl ? UrlResolver::resolve($query, $this->iota) : $this->iota->search($query, $limit);
+            $out = $isUrl
+                ? UrlResolver::resolve($query, $this->iota, $this->ritesh)
+                : $this->searchCached($query, $limit, $provider);
         }
         if ($out === [] && $useRitesh) {
             $hit = $isUrl ? $this->ritesh->resolveUrl($query) : null;
@@ -1820,6 +1843,48 @@ final class App
             }
         }
         return array_values($out);
+    }
+
+    /**
+     * Auto-cache for text searches: a repeated /play of the same words is
+     * served from data/qcache.json instead of hitting the provider again.
+     * Results are keyed per provider so /provider switches stay correct.
+     *
+     * @return list<array>
+     */
+    private function searchCached(string $query, int $limit, string $provider): array
+    {
+        $q = trim(preg_replace('~\s+~u', ' ', mb_strtolower($query, 'UTF-8')) ?? $query);
+        $key = $provider . '|' . $q;
+        $c = $this->qcache();
+        $e = $c[$key] ?? null;
+        if (is_array($e) && isset($e['ts']) && time() - (int) $e['ts'] < 21600 && ($e['r'] ?? []) !== []) {
+            return array_slice((array) $e['r'], 0, $limit);
+        }
+        $r = $this->iota->search($query, $limit);
+        if ($r !== []) {
+            $c[$key] = ['ts' => time(), 'r' => array_values($r)];
+            if (count($c) > 400) {
+                uasort($c, static fn(array $a, array $b): int => (int) $b['ts'] <=> (int) $a['ts']);
+                $c = array_slice($c, 0, 400, true);
+            }
+            $this->qcache = $c;
+            @file_put_contents(
+                dirname(__DIR__) . '/data/qcache.json',
+                json_encode($c, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            );
+        }
+        return $r;
+    }
+
+    private function qcache(): array
+    {
+        if ($this->qcache !== null) {
+            return $this->qcache;
+        }
+        $raw = @file_get_contents(dirname(__DIR__) . '/data/qcache.json');
+        $j = $raw !== false ? json_decode($raw, true) : null;
+        return $this->qcache = is_array($j) ? $j : [];
     }
 
     private function cmdPlay(int $chatId, int $sender, string $arg, bool $vcVideo, int $replyTo = 0, int $replied = 0): void
@@ -1843,7 +1908,8 @@ final class App
         // Pasted links (Spotify / Apple Music / Deezer / YouTube / direct file)
         // must be resolved to a real track first — iota would treat the URL
         // itself as a text query and return nothing.
-        $results = $this->findTracks($arg, 5);
+        $isLink = UrlResolver::isUrl($arg);
+        $results = $this->findTracks($arg, $isLink ? 10 : 5);
         if ($results === []) {
             $this->send($chatId, $this->t($chatId, 'no_song_found'));
             return;
@@ -1874,6 +1940,29 @@ final class App
                 'url' => $this->trackUrl($t),
                 'by' => $this->mention($sender),
             ]), 0, Buttons::playMarkup($this->loc, $this->lang($chatId), $r, true));
+        }
+
+        // Album / playlist link → the resolver returns the whole track list;
+        // queue everything after the one that just started.
+        if ($isLink && count($results) > 1) {
+            $added = 0;
+            foreach (array_slice($results, 1) as $extra) {
+                if ($added >= 20 || ($extra['media_id'] ?? '') === '') {
+                    break;
+                }
+                if ($vcVideo) {
+                    $extra['video'] = true;
+                }
+                $extra['req'] = $sender;
+                $r->queue[] = $extra;
+                $added++;
+            }
+            if ($added > 0) {
+                $this->send($chatId, $this->t($chatId, 'play_added_to_queue_album', [
+                    'count' => (string) $added,
+                    'title' => Util::escapeHtml((string) ($results[0]['title'] ?? '')),
+                ]));
+            }
         }
     }
 
@@ -2219,7 +2308,55 @@ final class App
         return $this->send($chatId, $caption, 0, $this->playMarkup($r));
     }
 
+    /**
+     * Keep the audio cache inside a size budget. Oldest files go first; a file
+     * currently playing is touched on every access so it is never the victim.
+     */
+    private function pruneDownloads(): void
+    {
+        $cap = (int) (getenv('CACHE_MAX_MB') ?: 2048) * 1024 * 1024;
+        if ($cap <= 0) {
+            return;
+        }
+        $files = [];
+        $total = 0;
+        foreach (glob($this->downloads . '/*') ?: [] as $f) {
+            if (!is_file($f)) {
+                continue;
+            }
+            $size = (int) @filesize($f);
+            $total += $size;
+            $files[] = ['p' => $f, 's' => $size, 'm' => (int) @filemtime($f)];
+        }
+        if ($total <= $cap) {
+            return;
+        }
+        usort($files, static fn(array $a, array $b): int => $a['m'] <=> $b['m']);
+        $freed = 0;
+        foreach ($files as $f) {
+            if ($total - $freed <= $cap) {
+                break;
+            }
+            if (@unlink($f['p'])) {
+                $freed += $f['s'];
+            }
+        }
+        if ($freed > 0) {
+            echo '[cache] pruned ' . round($freed / 1048576, 1) . " MB\n";
+        }
+    }
+
     private function resolveTrack(array $t, bool $video): ?string
+    {
+        $path = $this->resolveTrackFile($t, $video);
+        if ($path !== null && !str_starts_with($path, 'http')) {
+            @touch($path);          // mark as recently used for the LRU pruner
+            $this->pruneDownloads();
+        }
+        return $path;
+    }
+
+    private function resolveTrackFile(array $t, bool $video): ?string
     {
         $mediaId = (string) ($t['media_id'] ?? '');
         // Direct media link: ntgcalls' ffmpeg source streams http(s) URLs as-is.

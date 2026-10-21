@@ -434,6 +434,12 @@ play_single_track_too_long: |
 
 play_download_failed: "{emoji:❌} डाउनलोड विफल। कृपया पुनः प्रयास करें।"
 
+play_added_to_queue_album: |
+  <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
+
+  <blockquote>▫ 𝐒‌ᴛᴧʀᴛєᴅ : {title}
+  ▫ 𝐀‌ᴅᴅєᴅ : {count} 𝐌‌σʀє 𝐓‌ʀᴧᴄᴋs</blockquote>
+
 play_added_to_queue_single: |
   <b>{emoji:🎵} प्रतीक्षा सूची में जोड़ा गया:</b> #{index}
 

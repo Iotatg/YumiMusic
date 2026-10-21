@@ -74,6 +74,36 @@ final class Iota
         return $out;
     }
 
+    /**
+     * Metadata for a single prefixed media id (yt:/sp:/dz:/am:/jv:/sc:/bp:/rs:/mb:).
+     * Returns null when the provider does not know the id.
+     *
+     * @return array{media_id:string,title:string,artist:string,duration:int,thumbnail:string}|null
+     */
+    public function info(string $mediaId): ?array
+    {
+        if ($mediaId === '') {
+            return null;
+        }
+        $url = $this->baseUrl . '/info/' . rawurlencode($mediaId)
+            . '?key=' . rawurlencode($this->apiKey);
+        $body = self::httpGet($url, 12);
+        if ($body === null) {
+            return null;
+        }
+        $j = json_decode($body, true);
+        if (!is_array($j) || (string) ($j['media_id'] ?? '') === '') {
+            return null;
+        }
+        return [
+            'media_id' => (string) $j['media_id'],
+            'title' => (string) ($j['title'] ?? ''),
+            'artist' => (string) ($j['artist'] ?? ''),
+            'duration' => (int) ($j['duration_seconds'] ?? 0),
+            'thumbnail' => (string) ($j['thumbnail_url'] ?? ''),
+        ];
+    }
+
     public function baseUrl(): string
     {
         return $this->baseUrl;
