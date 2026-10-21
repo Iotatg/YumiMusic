@@ -70,6 +70,10 @@
   cp .env.example .env
   nano .env   # API_ID, API_HASH, TOKEN, OWNER_ID, STRING_SESSIONS, ...
 
+  # 3b. Assistant session (the user account that streams into the voice chat)
+  #     A bot account cannot join a group call, so this one is required.
+  php tools/login.php      # phone + login code → data/assistant.session.string
+
   # 4. YouTube cookies (fixes video extraction)
   #    Export with a browser extension ("Get cookies.txt LOCALLY")
   #    and save as data/cookies.txt
