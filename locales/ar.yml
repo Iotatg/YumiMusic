@@ -447,6 +447,9 @@ chatbot_admin_only: "هذا الأمر للمشرفين فقط."
 chatbot_groups_only: "هذا الأمر يعمل في المجموعات فقط."
 chatbot_usage: "الاستخدام: /chatbot on | off"
 chatbot_reset: "🧠 تم مسح ذاكرة روبوت الدردشة."
+chatbot_busy: |
+  🐢 <b>تمهّل قليلًا</b>
+  <blockquote>انتهت حصة الذكاء الاصطناعي لهذه الدقيقة. حاول مرة أخرى بعد دقيقة.</blockquote>
 chatbot_no_key: |
   ⚠️ <b>لا يوجد مزوّد ذكاء اصطناعي مُهيّأ</b>
   <blockquote>أضف أحد المفاتيح <code>AI_API_KEY</code> أو <code>APINEX_API_KEY</code> أو <code>GROQ_API_KEY</code> أو <code>OPENROUTER_API_KEY</code> أو <code>OPENAI_API_KEY</code> إلى ملف <code>.env</code> ثم أعد تشغيل البوت. سيبقى روبوت الدردشة صامتًا حتى ذلك الحين.</blockquote>

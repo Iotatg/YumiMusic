@@ -619,6 +619,9 @@ chatbot_admin_only: "Only admins can use this command."
 chatbot_groups_only: "This command works in groups only."
 chatbot_usage: "Usage: /chatbot on | off"
 chatbot_reset: "🧠 Chatbot memory cleared."
+chatbot_busy: |
+  🐢 <b>Slow down a bit</b>
+  <blockquote>The AI quota for this minute is used up. Try again in a minute.</blockquote>
 chatbot_no_key: |
   ⚠️ <b>No AI provider configured</b>
   <blockquote>Add one of <code>AI_API_KEY</code>, <code>APINEX_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>OPENROUTER_API_KEY</code> or <code>OPENAI_API_KEY</code> to <code>.env</code> and restart the bot. The chatbot stays silent until then.</blockquote>

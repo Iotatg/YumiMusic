@@ -150,6 +150,7 @@ final class App
 
         $this->botPeers->refresh();
         $this->setCommands();
+        echo "[yumi] chatbot — " . ($this->chatbot->available() ? 'on (' . $this->chatbot->model() . ')' : 'off (no key)') . "\n";
         echo "[yumi] ready — owner={$this->ownerId} vc=" . ($this->vcEnabled ? 'on' : 'off') . "\n";
     }
 

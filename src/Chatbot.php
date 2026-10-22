@@ -33,6 +33,11 @@ final class Chatbot
     private bool $providerResolved = false;
     private string $username = '';
 
+    /** Unix timestamps of the calls made in the last 60 s (sliding window). */
+    private array $callTimes = [];
+    /** Set from a 429 body ("Retry in 38s") so we stop hammering the API. */
+    private int $blockedUntil = 0;
+
     public function __construct(string $file, string $botName, int $ownerId)
     {
         $this->file = $file;
@@ -88,7 +93,7 @@ final class Chatbot
         $this->providerResolved = true;
         $sets = [
             ['key' => getenv('AI_API_KEY'), 'url' => getenv('AI_BASE_URL'), 'model' => getenv('AI_MODEL'), 'fb' => getenv('AI_FALLBACK_MODEL')],
-            ['key' => getenv('APINEX_API_KEY'), 'url' => getenv('APINEX_API_URL') ?: 'https://apinex.in/v1', 'model' => getenv('APINEX_MODEL'), 'fb' => getenv('APINEX_FALLBACK_MODEL')],
+            ['key' => getenv('APINEX_API_KEY'), 'url' => getenv('APINEX_API_URL') ?: 'https://api.apinex.bond/v1', 'model' => getenv('APINEX_MODEL'), 'fb' => getenv('APINEX_FALLBACK_MODEL')],
             ['key' => getenv('GROQ_API_KEY'), 'url' => 'https://api.groq.com/openai/v1', 'model' => getenv('GROQ_MODEL'), 'fb' => null],
             ['key' => getenv('OPENROUTER_API_KEY'), 'url' => 'https://openrouter.ai/api/v1', 'model' => getenv('OPENROUTER_MODEL'), 'fb' => null],
             ['key' => getenv('OPENAI_API_KEY'), 'url' => 'https://api.openai.com/v1', 'model' => getenv('OPENAI_MODEL'), 'fb' => null],
@@ -129,6 +134,13 @@ final class Chatbot
     public function available(): bool
     {
         return $this->resolveProvider() !== null;
+    }
+
+    /** "model (+fallback)" — for the boot log. */
+    public function model(): string
+    {
+        $p = $this->resolveProvider();
+        return $p === null ? '' : implode(' → ', $p['models']);
     }
 
     // ── switches ─────────────────────────────────────────────────────────────
@@ -293,6 +305,9 @@ final class Chatbot
     /** @param list<array{role:string,content:string}> $messages */
     private function call(array $provider, array $messages): ?string
     {
+        if ($this->throttledNow()) {
+            return null;
+        }
         foreach ($provider['models'] as $model) {
             $body = json_encode([
                 'model' => $model,
@@ -301,6 +316,10 @@ final class Chatbot
                 'temperature' => 0.45,
             ], JSON_UNESCAPED_UNICODE);
             for ($attempt = 0; $attempt < 2; $attempt++) {
+                if ($this->throttledNow()) {
+                    return null;
+                }
+                $this->callTimes[] = time();
                 $ch = curl_init($provider['url']);
                 curl_setopt_array($ch, [
                     CURLOPT_POST => true,
@@ -320,7 +339,13 @@ final class Chatbot
                     usleep(800000);
                     continue;
                 }
-                if ($code === 429 || $code >= 500) {
+                if ($code === 429) {
+                    // The account has a hard per-minute quota; retrying inside
+                    // the same minute only burns more of it.
+                    $this->blockedUntil = time() + $this->retryAfter((string) $raw);
+                    return null;
+                }
+                if ($code >= 500) {
                     usleep(900000);
                     continue;
                 }
@@ -336,6 +361,58 @@ final class Chatbot
             }
         }
         return null;
+    }
+
+    // ── quota ────────────────────────────────────────────────────────────────
+
+    /** Requests per minute allowed by the plan (apinex free tier is 5). */
+    private function rpm(): int
+    {
+        $n = (int) (getenv('CHATBOT_RPM') ?: 5);
+        return $n > 0 ? $n : 5;
+    }
+
+    /** True while the provider must not be called at all. */
+    public function throttledNow(): bool
+    {
+        $now = time();
+        if ($now < $this->blockedUntil) {
+            return true;
+        }
+        $this->callTimes = array_values(array_filter(
+            $this->callTimes,
+            static fn(int $t): bool => $t > $now - 60
+        ));
+        return count($this->callTimes) >= $this->rpm();
+    }
+
+    /** Seconds until the provider may be called again. */
+    public function throttleWait(): int
+    {
+        $now = time();
+        if ($now < $this->blockedUntil) {
+            return $this->blockedUntil - $now;
+        }
+        if ($this->callTimes === []) {
+            return 0;
+        }
+        $oldest = min($this->callTimes);
+        return max(0, $oldest + 60 - $now);
+    }
+
+    /** "Retry in 38s" / "retry_after":38 → seconds, clamped to 5..120. */
+    private function retryAfter(string $body): int
+    {
+        $sec = 0;
+        if (preg_match('~retry in (\d+)\s*s~i', $body, $m)) {
+            $sec = (int) $m[1];
+        } elseif (preg_match('~"retry_after"\s*:\s*(\d+)~', $body, $m)) {
+            $sec = (int) $m[1];
+        }
+        if ($sec <= 0) {
+            $sec = 60;
+        }
+        return max(5, min(120, $sec));
     }
 
     private function nowIst(): string

@@ -59,6 +59,9 @@ trait Extras
     /** @var array<string,bool> chatId:error → already reported */
     private array $deleteWarned = [];
 
+    /** @var array<int,int> chatId → last time we told them the bot is rate-limited */
+    private array $busyWarned = [];
+
     private function deleteMsgs(int $chatId, array $ids): void
     {
         $ids = array_values(array_filter(array_map('intval', $ids)));
@@ -242,6 +245,11 @@ trait Extras
         $this->typing($chatId);
         $answer = $this->chatbot->reply($chatId, $sender, $text, $isGroup);
         if ($answer === null) {
+            // Silence looks like a broken bot, so say once why nothing came.
+            if ($this->chatbot->throttledNow() && (time() - ($this->busyWarned[$chatId] ?? 0)) > 90) {
+                $this->busyWarned[$chatId] = time();
+                $this->send($chatId, $this->t($chatId, 'chatbot_busy'), $msgId);
+            }
             return;
         }
         $first = true;

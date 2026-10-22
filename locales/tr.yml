@@ -446,6 +446,9 @@ chatbot_admin_only: "Bu komut yalnızca yöneticiler için."
 chatbot_groups_only: "Bu komut yalnızca gruplarda çalışır."
 chatbot_usage: "Kullanım: /chatbot on | off"
 chatbot_reset: "🧠 Sohbet botu hafızası temizlendi."
+chatbot_busy: |
+  🐢 <b>Biraz yavaşla</b>
+  <blockquote>Bu dakikanın yapay zekâ kotası doldu. Bir dakika sonra tekrar dene.</blockquote>
 chatbot_no_key: |
   ⚠️ <b>Yapılandırılmış yapay zekâ sağlayıcısı yok</b>
   <blockquote><code>.env</code> dosyasına <code>AI_API_KEY</code>, <code>APINEX_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>OPENROUTER_API_KEY</code> veya <code>OPENAI_API_KEY</code> anahtarlarından birini ekleyip botu yeniden başlatın. O zamana kadar sohbet botu sessiz kalır.</blockquote>
