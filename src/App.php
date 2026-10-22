@@ -273,6 +273,7 @@ final class App
                 ['createplaylist', 'ηєω ᴘʟᴧʏʟɪsᴛ'], ['addtoplaylist', 'ᴧᴅᴅ ᴧ ᴛʀᴧᴄᴋ'],
                 ['provider', 'sєᴀʀᴄʜ ʙᴧᴄᴋєηᴅ'],
                 ['welcome', 'ᴛσɢɢʟє ωєʟᴄσᴍє'], ['promote', 'ᴘʀσᴍσᴛє ᴧ ᴍєᴍʙєʀ'],
+                ['chatbot', 'ᴛᴧʟᴋ ᴛσ ᴛʜє ʙσᴛ ɪη ᴛєxᴛ'], ['resetbot', 'ᴄʟєᴧʀ ᴄʜᴧᴛ ᴍєᴍσʀʏ'],
                 ['demote', 'ᴅєᴍσᴛє ᴧ ᴍєᴍʙєʀ'], ['cleanmode', 'ᴧυᴛσ-ᴅєʟєᴛє ᴄᴏᴍᴍᴀɴᴅs'],
                 ['blacklisted', 'ɢʟσʙᴧʟ ʙʟᴧᴄᴋʟɪsᴛ'],
             ];
