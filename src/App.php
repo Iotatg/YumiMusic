@@ -798,6 +798,10 @@ final class App
                     return;
                 }
                 $this->chatbot->setEnabled($chatId, $on);
+                if ($on && !$this->chatbot->available()) {
+                    $this->send($chatId, $this->t($chatId, 'chatbot_no_key'));
+                    return;
+                }
                 $this->send($chatId, $this->t($chatId, $on ? 'chatbot_on' : 'chatbot_off'));
                 return;
             case '/gchatbot':
@@ -807,6 +811,10 @@ final class App
                 }
                 $on = !$this->chatbot->globalOn();
                 $this->chatbot->setGlobal($on);
+                if ($on && !$this->chatbot->available()) {
+                    $this->send($chatId, $this->t($chatId, 'chatbot_no_key'));
+                    return;
+                }
                 $this->send($chatId, $this->t($chatId, $on ? 'chatbot_global_on' : 'chatbot_global_off'));
                 return;
             case '/resetbot':

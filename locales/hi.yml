@@ -447,6 +447,9 @@ chatbot_admin_only: "यह कमांड सिर्फ एडमिन क�
 chatbot_groups_only: "यह कमांड सिर्फ ग्रुप में काम करता है।"
 chatbot_usage: "इस्तेमाल: /chatbot on | off"
 chatbot_reset: "🧠 चैटबॉट की याददाश्त साफ कर दी।"
+chatbot_no_key: |
+  ⚠️ <b>कोई AI प्रोवाइडर सेट नहीं है</b>
+  <blockquote><code>.env</code> में <code>AI_API_KEY</code>, <code>APINEX_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>OPENROUTER_API_KEY</code> या <code>OPENAI_API_KEY</code> में से कोई एक डालें और बॉट रीस्टार्ट करें। तब तक चैटबॉट चुप रहेगा।</blockquote>
 
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
