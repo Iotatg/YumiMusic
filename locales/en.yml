@@ -611,11 +611,13 @@ assistant_unavailable: |
 
   <blockquote>The assistant account that streams into the voice chat is no longer active. Add a fresh session string and restart the bot.</blockquote>
 
-chatbot_on: "🤖 Chatbot is now ON in this chat."
-chatbot_off: "🤖 Chatbot is now OFF in this chat."
+chatbot_on: "🤖 Chatbot is ON in this chat. Call my name, tag me or reply to me — I won't answer every message."
+chatbot_off: "🤖 Chatbot is OFF in this chat. I'll stay quiet until you turn it back on."
+chatbot_status_on: "🤖 Chatbot is ON here — call my name, tag me or reply to me and I'll answer."
+chatbot_status_off: "🤖 Chatbot is OFF here. Turn it back on with /chatbot on."
 chatbot_on_tip: |
-  👂 <b>One thing to check</b>
-  <blockquote>Telegram hides normal messages from bots. Make me an admin here — or turn off privacy for me in BotFather — so I hear everything, not just @mentions.</blockquote>
+  👂 <b>How I listen</b>
+  <blockquote>I answer only when you call my name, tag my @username, mention me or reply to my message — never on every message, admin or not. Telegram also withholds plain group messages from a bot unless it is an admin here, so keep me as admin if you want name triggers to reach me.</blockquote>
 chatbot_global_on: "🤖 Global chatbot is ON."
 chatbot_global_off: "🤖 Global chatbot is OFF."
 chatbot_admin_only: "Only admins can use this command."

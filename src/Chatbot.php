@@ -199,9 +199,13 @@ PERSONA, [
 
     // ── switches ─────────────────────────────────────────────────────────────
 
+    /**
+     * Per-chat switch. On unless the chat muted itself: "on" means the bot may
+     * answer here, not that it answers everything — see shouldAnswer().
+     */
     public function enabled(int $chatId): bool
     {
-        return (bool) ($this->state['chats'][$chatId] ?? false);
+        return (bool) ($this->state['chats'][$chatId] ?? true);
     }
 
     public function setEnabled(int $chatId, bool $on): void
@@ -278,7 +282,13 @@ PERSONA, [
         return array_values(array_unique(array_filter($list)));
     }
 
-    /** Should this group message be answered? */
+    /**
+     * Should this group message be answered?
+     *
+     * Never "every message", not even for an admin: a chat that is switched on
+     * still needs one of the four triggers below, otherwise a busy group turns
+     * into a flood of unwanted replies. `/chatbot off` mutes the chat entirely.
+     */
     public function shouldAnswer(
         int $chatId,
         string $text,
@@ -286,8 +296,8 @@ PERSONA, [
         bool $replyToBot,
         bool $mentioned = false
     ): bool {
-        if ($this->enabled($chatId)) {
-            return true;
+        if (!$this->enabled($chatId)) {
+            return false;
         }
         if ($replyToBot || $mentioned) {
             return true;

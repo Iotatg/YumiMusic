@@ -864,12 +864,21 @@ final class App
                     return;
                 }
                 $arg = strtolower(trim($arg));
+                if ($arg === '' || $arg === 'status') {
+                    // Bare /chatbot used to flip the switch; with "on" as the
+                    // default that would mute the chat by accident.
+                    $this->send($chatId, $this->t(
+                        $chatId,
+                        $this->chatbot->enabled($chatId) ? 'chatbot_status_on' : 'chatbot_status_off'
+                    ));
+                    return;
+                }
                 $on = !$this->chatbot->enabled($chatId);
                 if (in_array($arg, ['on', 'enable', '1', 'true'], true)) {
                     $on = true;
                 } elseif (in_array($arg, ['off', 'disable', '0', 'false'], true)) {
                     $on = false;
-                } elseif ($arg !== '' && $arg !== 'toggle') {
+                } elseif ($arg !== 'toggle') {
                     $this->send($chatId, $this->t($chatId, 'chatbot_usage'));
                     return;
                 }

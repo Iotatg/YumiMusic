@@ -438,11 +438,13 @@ assistant_unavailable: |
 
   <blockquote>Sesli sohbete yayın yapan asistan hesabı artık etkin değil. Yeni bir oturum dizesi ekleyip botu yeniden başlatın.</blockquote>
 
-chatbot_on: "🤖 Sohbet botu bu sohbette açık."
-chatbot_off: "🤖 Sohbet botu bu sohbette kapalı."
+chatbot_on: "🤖 Sohbet botu bu sohbette açık. Adımı söyle, beni etiketle ya da mesajıma yanıt ver — her mesaja cevap vermem."
+chatbot_off: "🤖 Sohbet botu bu sohbette kapalı. Açana kadar sessiz kalırım."
+chatbot_status_on: "🤖 Sohbet botu burada açık — adımı söyle, etiketle ya da yanıtla, ancak o zaman konuşurum."
+chatbot_status_off: "🤖 Sohbet botu burada kapalı. /chatbot on ile aç."
 chatbot_on_tip: |
-  👂 <b>Dikkat edilecek bir şey</b>
-  <blockquote>Telegram normal mesajları botlara göstermez. Beni burada yönetici yap — ya da BotFather'da gizliliği kapat — böylece sadece @etiketleri değil her mesajı duyarım.</blockquote>
+  👂 <b>Ne zaman duyarım</b>
+  <blockquote>Yalnızca adımı söylediğinde, @username'imi etiketlediğinde, benden bahsettiğinde ya da mesajımı yanıtladığında cevap veririm — her mesaja değil, yönetici olsam bile. Telegram ayrıca bot yönetici değilse normal grup mesajlarını iletmez; isimle seslenmenin bana ulaşması için beni yönetici bırak.</blockquote>
 chatbot_global_on: "🤖 Genel sohbet botu açık."
 chatbot_global_off: "🤖 Genel sohbet botu kapalı."
 chatbot_admin_only: "Bu komut yalnızca yöneticiler için."
