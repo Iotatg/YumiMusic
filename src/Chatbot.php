@@ -265,6 +265,11 @@ PERSONA, [
     /**
      * Words that count as addressing the bot by name.
      *
+     * The display name is not enough: ours is written in styled letters
+     * (𝐘‌υϻɪ …), so a person typing plain "yumi" would never match it. The
+     * username is plain ASCII and always available once getMe answers, so its
+     * readable parts are added as triggers too.
+     *
      * @return list<string>
      */
     public function triggers(): array
@@ -274,12 +279,55 @@ PERSONA, [
         if ($list !== []) {
             return $list;
         }
-        $list = [trim($this->botName)];
-        $first = preg_split('~\s+~u', trim($this->botName)) ?: [];
-        if (($first[0] ?? '') !== '') {
-            $list[] = $first[0];
+
+        $list = [];
+        $name = trim((string) preg_replace('~[\x{200B}-\x{200D}\x{FEFF}]~u', '', $this->botName));
+        if ($name !== '') {
+            $list[] = $name;
+            foreach (preg_split('~\s+~u', $name) ?: [] as $word) {
+                if (mb_strlen($word) >= 3) {
+                    $list[] = $word;
+                }
+            }
         }
-        return array_values(array_unique(array_filter($list)));
+        foreach (self::nameVariants($this->username()) as $word) {
+            $list[] = $word;
+        }
+
+        return array_values(array_unique(array_filter($list, static fn ($w) => trim($w) !== '')));
+    }
+
+    /**
+     * Plain spellings of a bot username.
+     *
+     * `Yumi_MusicBot` → ["yumi"], `meow_clonerbot` → ["meow", "cloner"].
+     * Generic halves ("music", "bot") are dropped so the trigger stays a name
+     * people would actually type.
+     *
+     * @return list<string>
+     */
+    public static function nameVariants(string $username): array
+    {
+        $u = trim($username);
+        if ($u === '') {
+            return [];
+        }
+        $u = (string) preg_replace('~(?<=[a-z])(?=[A-Z])~', ' ', $u);
+        $generic = ['music', 'musicbot', 'bot', 'official', 'the', 'team', 'inc', 'ai', 'x', 'xm'];
+        $keep = [];
+        foreach (preg_split('~[^A-Za-z0-9]+~', $u) ?: [] as $part) {
+            $part = strtolower($part);
+            if ($part === '' || in_array($part, $generic, true)) {
+                continue;
+            }
+            if (strlen($part) > 5 && str_ends_with($part, 'bot')) {
+                $part = substr($part, 0, -3);
+            }
+            if (strlen($part) >= 3 && !in_array($part, $generic, true)) {
+                $keep[] = $part;
+            }
+        }
+        return array_values(array_unique($keep));
     }
 
     /**
