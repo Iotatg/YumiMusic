@@ -37,6 +37,7 @@ final class App
     private array $searchCache = [];
     /** @var array<string, array>|null persisted query → tracks (auto-cache) */
     private ?array $qcache = null;
+    private Chatbot $chatbot;
     /** @var array<string, bool> chatId:userId → admin flag (cleared by /reload) */
     private array $adminCache = [];
     private int $lastPing = 0;
@@ -74,6 +75,8 @@ final class App
         $this->loc->setBotName($this->botName);
         $this->db = new Db(dirname(__DIR__) . '/data/settings.json');
         Buttons::setBotUsername((string) (getenv('BOT_USERNAME') ?: 'Yumi_MusicBot'));
+        $this->chatbot = new Chatbot(dirname(__DIR__) . '/data/chatbot.json', $this->botName, $this->ownerId);
+        $this->chatbot->setUsername((string) (getenv('BOT_USERNAME') ?: ''));
 
         // ── bot client (raw MTProto, token auth) ──
         $this->bot = new MtProto($apiId, $apiHash, 2);
@@ -166,6 +169,7 @@ final class App
                 echo "[yumi-bot] session restored — @{$u->str('username')} ({$u->l('id')})\n";
                 if ($u->str('username') !== '') {
                     Buttons::setBotUsername($u->str('username'));
+                    $this->chatbot->setUsername($u->str('username'));
                 }
                 return true;
             }
@@ -192,6 +196,8 @@ final class App
                             echo "[yumi-bot] logged in as {$u->str('first_name')} @{$u->str('username')} ({$u->l('id')})\n";
                             if ($u->str('username') !== '') {
                                 Buttons::setBotUsername($u->str('username'));
+                                $this->chatbot->setUsername($u->str('username'));
+                    $this->chatbot->setUsername($u->str('username'));
                             }
                         }
                     }
@@ -406,7 +412,8 @@ final class App
         }
         $cmd = strtolower(explode('@', explode(' ', trim($text))[0], 2)[0]);
         if ($cmd === '' || $cmd[0] !== '/') {
-            $this->onPlainMessage($chatId, $sender, $text, $msgId);
+            $rt = $msg->node('reply_to');
+            $this->onPlainMessage($chatId, $sender, $text, $msgId, $rt !== null ? (int) ($rt->i('reply_to_msg_id') ?? 0) : 0);
             return;
         }
         $arg = trim(preg_replace('/^\/[a-z0-9_]+(@\w+)?\s*/i', '', $text));
@@ -769,6 +776,42 @@ final class App
                 $r->endStreak = 0;
                 $r->paused = false;
                 $this->send($chatId, $this->t($chatId, 'cb_replaying'), 0, $this->playMarkup($r));
+                return;
+            case '/chatbot':
+                if ($chatId > 0) {
+                    $this->send($chatId, $this->t($chatId, 'chatbot_groups_only'));
+                    return;
+                }
+                if (!$this->isAdmin($chatId, $sender) && $sender !== $this->ownerId) {
+                    $this->send($chatId, $this->t($chatId, 'chatbot_admin_only'));
+                    return;
+                }
+                $arg = strtolower(trim($arg));
+                $on = !$this->chatbot->enabled($chatId);
+                if (in_array($arg, ['on', 'enable', '1', 'true'], true)) {
+                    $on = true;
+                } elseif (in_array($arg, ['off', 'disable', '0', 'false'], true)) {
+                    $on = false;
+                } elseif ($arg !== '' && $arg !== 'toggle') {
+                    $this->send($chatId, $this->t($chatId, 'chatbot_usage'));
+                    return;
+                }
+                $this->chatbot->setEnabled($chatId, $on);
+                $this->send($chatId, $this->t($chatId, $on ? 'chatbot_on' : 'chatbot_off'));
+                return;
+            case '/gchatbot':
+                if ($sender !== $this->ownerId) {
+                    $this->send($chatId, $this->t($chatId, 'chatbot_admin_only'));
+                    return;
+                }
+                $on = !$this->chatbot->globalOn();
+                $this->chatbot->setGlobal($on);
+                $this->send($chatId, $this->t($chatId, $on ? 'chatbot_global_on' : 'chatbot_global_off'));
+                return;
+            case '/resetbot':
+            case '/clearchat':
+                $this->chatbot->reset($chatId < 0 ? $chatId : $sender);
+                $this->send($chatId, $this->t($chatId, 'chatbot_reset'));
                 return;
             case '/position':
                 $r = $this->rooms[$chatId] ?? null;
@@ -2893,6 +2936,19 @@ final class App
         return $peer->name === 'peerUser' && (int) $peer->l('user_id') === $chatId;
     }
 
+    /** Show "typing…" in the chat while the model thinks. */
+    public function typing(int $chatId): void
+    {
+        try {
+            $this->bot->invoke((new TlNode('messages.setTyping'))
+                ->put('flags', 0)
+                ->put('peer', $this->botPeers->inputPeer($chatId))
+                ->put('action', new TlNode('sendMessageTypingAction')), 8);
+        } catch (Throwable $e) {
+            // cosmetic only
+        }
+    }
+
     public function send(int $chatId, string $text, int $replyTo = 0, ?TlNode $markup = null): int
     {
         if ($text === '') {
@@ -2916,7 +2972,9 @@ final class App
             }
             $res = $this->bot->invoke($req, 30);
             $this->botPeers->learnFrom($res);
-            return $this->updatesMsgId($res, $chatId, $rid) ?: ($res->l('id') ?? 0);
+            $msgId = $this->updatesMsgId($res, $chatId, $rid) ?: ($res->l('id') ?? 0);
+            $this->chatbot->noteSent($chatId, (int) $msgId);
+            return $msgId;
         } catch (Throwable $e) {
             echo "[yumi] send failed ($chatId): " . $e->getMessage() . "\n";
             return 0;

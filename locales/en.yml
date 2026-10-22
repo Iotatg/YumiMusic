@@ -611,6 +611,15 @@ assistant_unavailable: |
 
   <blockquote>The assistant account that streams into the voice chat is no longer active. Add a fresh session string and restart the bot.</blockquote>
 
+chatbot_on: "🤖 Chatbot is now ON in this chat."
+chatbot_off: "🤖 Chatbot is now OFF in this chat."
+chatbot_global_on: "🤖 Global chatbot is ON."
+chatbot_global_off: "🤖 Global chatbot is OFF."
+chatbot_admin_only: "Only admins can use this command."
+chatbot_groups_only: "This command works in groups only."
+chatbot_usage: "Usage: /chatbot on | off"
+chatbot_reset: "🧠 Chatbot memory cleared."
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 

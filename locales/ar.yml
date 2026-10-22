@@ -439,6 +439,15 @@ assistant_unavailable: |
 
   <blockquote>حساب المساعد الذي يبث في الدردشة الصوتية لم يعد نشطًا. أضف سلسلة جلسة جديدة وأعد تشغيل البوت.</blockquote>
 
+chatbot_on: "🤖 تم تشغيل روبوت الدردشة في هذه المحادثة."
+chatbot_off: "🤖 تم إيقاف روبوت الدردشة في هذه المحادثة."
+chatbot_global_on: "🤖 روبوت الدردشة العام يعمل."
+chatbot_global_off: "🤖 روبوت الدردشة العام متوقف."
+chatbot_admin_only: "هذا الأمر للمشرفين فقط."
+chatbot_groups_only: "هذا الأمر يعمل في المجموعات فقط."
+chatbot_usage: "الاستخدام: /chatbot on | off"
+chatbot_reset: "🧠 تم مسح ذاكرة روبوت الدردشة."
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 

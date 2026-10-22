@@ -202,8 +202,11 @@ trait Extras
         $this->send($chatId, $this->t($chatId, 'filters_cleared', ['count' => (string) $n]));
     }
 
-    /** Plain-message hook: reply when a filter keyword is mentioned. */
-    public function onPlainMessage(int $chatId, int $sender, string $text, int $msgId): void
+    /**
+     * Plain-message hook: filters first (deterministic), then the AI chatbot
+     * when the message is addressed to the bot.
+     */
+    public function onPlainMessage(int $chatId, int $sender, string $text, int $msgId, int $replyTo = 0): void
     {
         if ($text === '' || str_starts_with($text, '/')) {
             return;
@@ -216,6 +219,35 @@ trait Extras
         if ($hit !== null) {
             echo "[extras] filter hit chat=$chatId\n";
             $this->send($chatId, $hit, $msgId);
+            return;
+        }
+        $this->chatbotTurn($chatId, $sender, $text, $msgId, $replyTo);
+    }
+
+    /** One chatbot turn: gate → typing indicator → answer. */
+    private function chatbotTurn(int $chatId, int $sender, string $text, int $msgId, int $replyTo): void
+    {
+        if (!$this->chatbot->available()) {
+            return;
+        }
+        $isGroup = $chatId < 0;
+        $username = $this->chatbot->username();
+        if ($isGroup) {
+            $replyToBot = $replyTo > 0 && $this->chatbot->isOwnMessage($chatId, $replyTo);
+            if (!$this->chatbot->shouldAnswer($chatId, $text, $username, $replyToBot)) {
+                return;
+            }
+            $text = $this->chatbot->cleanText($text, $username);
+        }
+        $this->typing($chatId);
+        $answer = $this->chatbot->reply($chatId, $sender, $text, $isGroup);
+        if ($answer === null) {
+            return;
+        }
+        $first = true;
+        foreach (Chatbot::chunks(Chatbot::toHtml($answer)) as $chunk) {
+            $this->send($chatId, $chunk, $first ? $msgId : 0);
+            $first = false;
         }
     }
 

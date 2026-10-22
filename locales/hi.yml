@@ -439,6 +439,15 @@ assistant_unavailable: |
 
   <blockquote>वॉइस चैट में स्ट्रीम करने वाला असिस्टेंट अकाउंट अब सक्रिय नहीं है। नया सेशन स्ट्रिंग जोड़कर बॉट रीस्टार्ट करें।</blockquote>
 
+chatbot_on: "🤖 इस चैट में चैटबॉट चालू हो गया।"
+chatbot_off: "🤖 इस चैट में चैटबॉट बंद हो गया।"
+chatbot_global_on: "🤖 ग्लोबल चैटबॉट चालू है।"
+chatbot_global_off: "🤖 ग्लोबल चैटबॉट बंद है।"
+chatbot_admin_only: "यह कमांड सिर्फ एडमिन के लिए है।"
+chatbot_groups_only: "यह कमांड सिर्फ ग्रुप में काम करता है।"
+chatbot_usage: "इस्तेमाल: /chatbot on | off"
+chatbot_reset: "🧠 चैटबॉट की याददाश्त साफ कर दी।"
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 

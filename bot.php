@@ -70,6 +70,7 @@ require __DIR__ . '/src/Db.php';
 require __DIR__ . '/src/MsgEntities.php';
 require __DIR__ . '/src/Room.php';
 require __DIR__ . '/src/Extras.php';
+require __DIR__ . '/src/Chatbot.php';
 require __DIR__ . '/src/App.php';
 
 echo "╔══════════════════════════════════════╗\n";

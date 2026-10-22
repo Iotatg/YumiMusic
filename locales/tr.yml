@@ -438,6 +438,15 @@ assistant_unavailable: |
 
   <blockquote>Sesli sohbete yayın yapan asistan hesabı artık etkin değil. Yeni bir oturum dizesi ekleyip botu yeniden başlatın.</blockquote>
 
+chatbot_on: "🤖 Sohbet botu bu sohbette açık."
+chatbot_off: "🤖 Sohbet botu bu sohbette kapalı."
+chatbot_global_on: "🤖 Genel sohbet botu açık."
+chatbot_global_off: "🤖 Genel sohbet botu kapalı."
+chatbot_admin_only: "Bu komut yalnızca yöneticiler için."
+chatbot_groups_only: "Bu komut yalnızca gruplarda çalışır."
+chatbot_usage: "Kullanım: /chatbot on | off"
+chatbot_reset: "🧠 Sohbet botu hafızası temizlendi."
+
 play_added_to_queue_album: |
   <blockquote><b>💿 𝐀‌ʟʙυᴍ 𝐐‌υєυєᴅ</b></blockquote>
 
