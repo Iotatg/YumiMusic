@@ -209,7 +209,7 @@ trait Extras
      * Plain-message hook: filters first (deterministic), then the AI chatbot
      * when the message is addressed to the bot.
      */
-    public function onPlainMessage(int $chatId, int $sender, string $text, int $msgId, int $replyTo = 0): void
+    public function onPlainMessage(int $chatId, int $sender, string $text, int $msgId, int $replyTo = 0, bool $mentioned = false): void
     {
         if ($text === '' || str_starts_with($text, '/')) {
             return;
@@ -224,11 +224,11 @@ trait Extras
             $this->send($chatId, $hit, $msgId);
             return;
         }
-        $this->chatbotTurn($chatId, $sender, $text, $msgId, $replyTo);
+        $this->chatbotTurn($chatId, $sender, $text, $msgId, $replyTo, $mentioned);
     }
 
     /** One chatbot turn: gate → typing indicator → answer. */
-    private function chatbotTurn(int $chatId, int $sender, string $text, int $msgId, int $replyTo): void
+    private function chatbotTurn(int $chatId, int $sender, string $text, int $msgId, int $replyTo, bool $mentioned): void
     {
         if (!$this->chatbot->available()) {
             return;
@@ -237,7 +237,12 @@ trait Extras
         $username = $this->chatbot->username();
         if ($isGroup) {
             $replyToBot = $replyTo > 0 && $this->chatbot->isOwnMessage($chatId, $replyTo);
-            if (!$this->chatbot->shouldAnswer($chatId, $text, $username, $replyToBot)) {
+            if (!$this->chatbot->shouldAnswer($chatId, $text, $username, $replyToBot, $mentioned)) {
+                // Only with CHATBOT_DEBUG=1: shows why a group message was left
+                // alone, which is the difference between "muted" and "broken".
+                if (getenv('CHATBOT_DEBUG')) {
+                    echo "[chatbot] skip chat=$chatId user=$sender (no trigger)\n";
+                }
                 return;
             }
             $text = $this->chatbot->cleanText($text, $username);

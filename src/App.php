@@ -28,6 +28,8 @@ final class App
     /** False when the assistant session is gone (deleted account / revoked). */
     private bool $assistantOk = true;
     private int $botId = 0;
+    /** null = unknown, false = privacy on (mentions only), true = reads all. */
+    private ?bool $readsAll = null;
     private bool $maint = false;
 
     /** @var array<int, Room> */
@@ -151,7 +153,42 @@ final class App
         $this->botPeers->refresh();
         $this->setCommands();
         echo "[yumi] chatbot — " . ($this->chatbot->available() ? 'on (' . $this->chatbot->model() . ')' : 'off (no key)') . "\n";
+        $this->reportGroupPrivacy();
         echo "[yumi] ready — owner={$this->ownerId} vc=" . ($this->vcEnabled ? 'on' : 'off') . "\n";
+    }
+
+    /**
+     * Say out loud whether Telegram forwards ordinary group messages to us.
+     *
+     * A bot with privacy on only ever sees commands, @mentions and replies,
+     * which looks exactly like a broken chatbot from the outside.
+     */
+    private function reportGroupPrivacy(): void
+    {
+        $token = (string) (getenv('TOKEN') ?: '');
+        if ($token === '') {
+            return;
+        }
+        $ch = curl_init('https://api.telegram.org/bot' . $token . '/getMe');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 5,
+            CURLOPT_CONNECTTIMEOUT => 3,
+        ]);
+        $raw = curl_exec($ch);
+        curl_close($ch);
+        if (!is_string($raw) || $raw === '') {
+            return;
+        }
+        $all = json_decode($raw, true)['result']['can_read_all_group_messages'] ?? null;
+        if ($all === false) {
+            $this->readsAll = false;
+            echo "[yumi] group privacy — ON: only @mentions, replies and commands reach me "
+                . "(make me an admin, or disable privacy in BotFather)\n";
+        } elseif ($all === true) {
+            $this->readsAll = true;
+            echo "[yumi] group privacy — off: every group message reaches me\n";
+        }
     }
 
     /** True when the imported auth key already belongs to a live bot session. */
@@ -391,6 +428,31 @@ final class App
         }
     }
 
+    /**
+     * Flatten a message's entities into the shape the chatbot gate expects.
+     *
+     * @return list<array{type:string,offset:int,length:int,user_id?:int}>
+     */
+    private function readEntities(TlNode $msg): array
+    {
+        $out = [];
+        foreach ($msg->list('entities') as $e) {
+            if (!$e instanceof TlNode) {
+                continue;
+            }
+            $item = [
+                'type' => $e->name,
+                'offset' => (int) $e->i('offset'),
+                'length' => (int) $e->i('length'),
+            ];
+            if ($e->has('user_id')) {
+                $item['user_id'] = (int) $e->l('user_id');
+            }
+            $out[] = $item;
+        }
+        return $out;
+    }
+
     private function onBotMessage(TlNode $msg): void
     {
         $peer = $msg->node('peer_id');
@@ -415,7 +477,20 @@ final class App
         $cmd = strtolower(explode('@', explode(' ', trim($text))[0], 2)[0]);
         if ($cmd === '' || $cmd[0] !== '/') {
             $rt = $msg->node('reply_to');
-            $this->onPlainMessage($chatId, $sender, $text, $msgId, $rt !== null ? (int) ($rt->i('reply_to_msg_id') ?? 0) : 0);
+            $mentioned = Chatbot::entityMentionsBot(
+                $this->readEntities($msg),
+                $text,
+                $this->botId,
+                $this->chatbot->username()
+            );
+            $this->onPlainMessage(
+                $chatId,
+                $sender,
+                $text,
+                $msgId,
+                $rt !== null ? (int) ($rt->i('reply_to_msg_id') ?? 0) : 0,
+                $mentioned
+            );
             return;
         }
         $arg = trim(preg_replace('/^\/[a-z0-9_]+(@\w+)?\s*/i', '', $text));
@@ -804,6 +879,10 @@ final class App
                     return;
                 }
                 $this->send($chatId, $this->t($chatId, $on ? 'chatbot_on' : 'chatbot_off'));
+                if ($on && $this->readsAll === false) {
+                    // Only nag when Telegram really is withholding messages.
+                    $this->send($chatId, $this->t($chatId, 'chatbot_on_tip'));
+                }
                 return;
             case '/gchatbot':
                 if ($sender !== $this->ownerId) {

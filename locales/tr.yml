@@ -440,6 +440,9 @@ assistant_unavailable: |
 
 chatbot_on: "🤖 Sohbet botu bu sohbette açık."
 chatbot_off: "🤖 Sohbet botu bu sohbette kapalı."
+chatbot_on_tip: |
+  👂 <b>Dikkat edilecek bir şey</b>
+  <blockquote>Telegram normal mesajları botlara göstermez. Beni burada yönetici yap — ya da BotFather'da gizliliği kapat — böylece sadece @etiketleri değil her mesajı duyarım.</blockquote>
 chatbot_global_on: "🤖 Genel sohbet botu açık."
 chatbot_global_off: "🤖 Genel sohbet botu kapalı."
 chatbot_admin_only: "Bu komut yalnızca yöneticiler için."

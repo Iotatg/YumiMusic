@@ -244,35 +244,111 @@ PERSONA, [
 
     // ── gating ───────────────────────────────────────────────────────────────
 
-    /** Should this group message be answered? */
-    public function shouldAnswer(int $chatId, string $text, string $botUsername, bool $replyToBot): bool
+    /**
+     * Words that count as addressing the bot by name.
+     *
+     * @return list<string>
+     */
+    public function triggers(): array
     {
+        $custom = (string) (getenv('CHATBOT_TRIGGER') ?: '');
+        $list = array_values(array_filter(array_map('trim', explode(',', $custom)), static fn ($t) => $t !== ''));
+        if ($list !== []) {
+            return $list;
+        }
+        $list = [trim($this->botName)];
+        $first = preg_split('~\s+~u', trim($this->botName)) ?: [];
+        if (($first[0] ?? '') !== '') {
+            $list[] = $first[0];
+        }
+        return array_values(array_unique(array_filter($list)));
+    }
+
+    /** Should this group message be answered? */
+    public function shouldAnswer(
+        int $chatId,
+        string $text,
+        string $botUsername,
+        bool $replyToBot,
+        bool $mentioned = false
+    ): bool {
         if ($this->enabled($chatId)) {
             return true;
         }
-        if ($replyToBot) {
+        if ($replyToBot || $mentioned) {
             return true;
         }
         $uname = strtolower(ltrim(trim($botUsername), '@'));
         if ($uname !== '' && str_contains(strtolower($text), '@' . $uname)) {
             return true;
         }
-        $triggers = array_filter(array_map('trim', explode(',', (string) (getenv('CHATBOT_TRIGGER') ?: ''))));
-        if ($triggers === []) {
-            $triggers = [$this->botName];
-            $first = preg_split('~\s+~u', trim($this->botName)) ?: [];
-            if (($first[0] ?? '') !== '') {
-                $triggers[] = $first[0];
-            }
-        }
-        $hay = ' ' . preg_replace('~\s+~u', ' ', mb_strtolower($text, 'UTF-8')) . ' ';
-        foreach ($triggers as $t) {
-            $t = mb_strtolower(trim($t), 'UTF-8');
-            if ($t !== '' && str_contains($hay, ' ' . $t . ' ')) {
+        foreach ($this->triggers() as $t) {
+            // A name counts wherever it stands on its own, so "yumi," and
+            // "arre yumi!" are hits — the old space-padded compare missed both.
+            if (self::hasWord($text, $t)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Case-insensitive whole-word search that tolerates punctuation. */
+    public static function hasWord(string $haystack, string $needle): bool
+    {
+        $needle = trim($needle);
+        if ($needle === '') {
+            return false;
+        }
+        $re = '~(?<![\p{L}\p{N}_])' . preg_quote($needle, '~') . '(?![\p{L}\p{N}_])~iu';
+        return preg_match($re, $haystack) === 1;
+    }
+
+    /**
+     * True when one of the message entities is a mention of this bot.
+     *
+     * `messageEntityMentionName` is what Telegram sends when someone taps the
+     * bot in the member list; the visible text is then the display name, not
+     * the @username, so matching on text alone misses it.
+     *
+     * @param list<array{type:string,offset:int,length:int,user_id?:int}> $entities
+     */
+    public static function entityMentionsBot(array $entities, string $text, int $botId, string $botUsername): bool
+    {
+        $uname = strtolower(ltrim(trim($botUsername), '@'));
+        foreach ($entities as $e) {
+            $type = (string) ($e['type'] ?? '');
+            if ($type === 'messageEntityMentionName') {
+                if ($botId > 0 && (int) ($e['user_id'] ?? 0) === $botId) {
+                    return true;
+                }
+                continue;
+            }
+            if ($type === 'messageEntityMention' && $uname !== '') {
+                $chunk = strtolower(trim(self::utf16Slice($text, (int) ($e['offset'] ?? 0), (int) ($e['length'] ?? 0))));
+                if ($chunk === '@' . $uname) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Telegram entity offsets are UTF-16 code units, not bytes or runes. */
+    private static function utf16Slice(string $text, int $offset, int $length): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+        $units = array_values(unpack('n*', mb_convert_encoding($text, 'UTF-16BE', 'UTF-8')) ?: []);
+        $slice = array_slice($units, $offset, $length);
+        if ($slice === []) {
+            return '';
+        }
+        $bytes = '';
+        foreach ($slice as $u) {
+            $bytes .= pack('n', $u);
+        }
+        return mb_convert_encoding($bytes, 'UTF-8', 'UTF-16BE');
     }
 
     public function cleanText(string $text, string $botUsername): string
@@ -281,8 +357,18 @@ PERSONA, [
         if ($uname !== '') {
             $text = preg_replace('~@' . preg_quote($uname, '~') . '~i', '', $text) ?? $text;
         }
+        foreach ($this->triggers() as $t) {
+            if (trim($t) === '') {
+                continue;
+            }
+            $text = preg_replace(
+                '~(?<![\p{L}\p{N}_])' . preg_quote(trim($t), '~') . '(?![\p{L}\p{N}_])~iu',
+                '',
+                $text
+            ) ?? $text;
+        }
         $text = preg_replace('~\s+~u', ' ', $text) ?? $text;
-        $text = trim($text);
+        $text = trim($text, " \t\n\r\0\x0B,.-!?");
         return $text === '' ? 'hmm' : $text;
     }
 

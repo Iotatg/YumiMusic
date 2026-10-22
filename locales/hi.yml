@@ -441,6 +441,9 @@ assistant_unavailable: |
 
 chatbot_on: "🤖 इस चैट में चैटबॉट चालू हो गया।"
 chatbot_off: "🤖 इस चैट में चैटबॉट बंद हो गया।"
+chatbot_on_tip: |
+  👂 <b>एक बात ध्यान रखो</b>
+  <blockquote>टेलीग्राम बॉट को सामान्य मैसेज नहीं भेजता। मुझे इस ग्रुप का admin बना दो — या BotFather में privacy बंद कर दो — तब सिर्फ़ @mention ही नहीं, हर मैसेज सुनाई देगा।</blockquote>
 chatbot_global_on: "🤖 ग्लोबल चैटबॉट चालू है।"
 chatbot_global_off: "🤖 ग्लोबल चैटबॉट बंद है।"
 chatbot_admin_only: "यह कमांड सिर्फ एडमिन के लिए है।"

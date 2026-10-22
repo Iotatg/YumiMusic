@@ -613,6 +613,9 @@ assistant_unavailable: |
 
 chatbot_on: "🤖 Chatbot is now ON in this chat."
 chatbot_off: "🤖 Chatbot is now OFF in this chat."
+chatbot_on_tip: |
+  👂 <b>One thing to check</b>
+  <blockquote>Telegram hides normal messages from bots. Make me an admin here — or turn off privacy for me in BotFather — so I hear everything, not just @mentions.</blockquote>
 chatbot_global_on: "🤖 Global chatbot is ON."
 chatbot_global_off: "🤖 Global chatbot is OFF."
 chatbot_admin_only: "Only admins can use this command."
