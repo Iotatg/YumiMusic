@@ -28,6 +28,8 @@ final class Chatbot
     private array $lastSeen = [];
     /** @var array<int, array<int, bool>> chatId → message id → true */
     private array $ownMsgs = [];
+    /** Last time ownMsgs hit the disk (throttles writes to once per 5 s). */
+    private int $ownSaved = 0;
 
     private ?array $provider = null;
     private bool $providerResolved = false;
@@ -45,6 +47,7 @@ final class Chatbot
         $this->ownerId = $ownerId;
         $this->persona = $this->loadPersona();
         $this->state = $this->load();
+        $this->ownMsgs = $this->state['own'] ?? [];
     }
 
     // ── configuration ────────────────────────────────────────────────────────
@@ -234,6 +237,17 @@ PERSONA, [
         $this->ownMsgs[$chatId][$msgId] = true;
         if (count($this->ownMsgs[$chatId]) > 60) {
             $this->ownMsgs[$chatId] = array_slice($this->ownMsgs[$chatId], -60, null, true);
+        }
+        if (count($this->ownMsgs) > 40) {
+            $this->ownMsgs = array_slice($this->ownMsgs, -40, null, true);
+        }
+        // Replying to a message we sent before the last restart has to work,
+        // so keep a short trail on disk — but do not fsync on every send.
+        $this->state['own'] = $this->ownMsgs;
+        $now = time();
+        if ($now - $this->ownSaved > 5) {
+            $this->ownSaved = $now;
+            $this->save();
         }
     }
 
@@ -602,12 +616,13 @@ PERSONA, [
         $raw = @file_get_contents($this->file);
         $j = $raw !== false ? json_decode($raw, true) : null;
         if (!is_array($j)) {
-            return ['global' => true, 'chats' => [], 'sessions' => []];
+            return ['global' => true, 'chats' => [], 'sessions' => [], 'own' => []];
         }
         return [
             'global' => (bool) ($j['global'] ?? true),
             'chats' => is_array($j['chats'] ?? null) ? $j['chats'] : [],
             'sessions' => is_array($j['sessions'] ?? null) ? $j['sessions'] : [],
+            'own' => is_array($j['own'] ?? null) ? $j['own'] : [],
         ];
     }
 

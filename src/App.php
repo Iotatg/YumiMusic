@@ -183,8 +183,8 @@ final class App
         $all = json_decode($raw, true)['result']['can_read_all_group_messages'] ?? null;
         if ($all === false) {
             $this->readsAll = false;
-            echo "[yumi] group privacy — ON: only @mentions, replies and commands reach me "
-                . "(make me an admin, or disable privacy in BotFather)\n";
+            echo "[yumi] group privacy — ON: in groups where I am not admin, only "
+                . "@mentions, replies and commands reach me\n";
         } elseif ($all === true) {
             $this->readsAll = true;
             echo "[yumi] group privacy — off: every group message reaches me\n";
